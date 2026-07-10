@@ -22,6 +22,39 @@ const initRateio = (obras_sel, valor) => {
   return r
 }
 
+// Redimensiona/comprime imagens grandes (fotos de celular) antes de enviar,
+// convertendo para JPEG e limitando a maior dimensão. PDFs passam direto.
+const MAX_DIMENSAO = 1920
+const QUALIDADE_JPEG = 0.82
+
+const compressImage = (file) => new Promise((resolve, reject) => {
+  if (!file.type.startsWith('image/')) { resolve(file); return }
+  const img = new Image()
+  const url = URL.createObjectURL(file)
+  img.onload = () => {
+    URL.revokeObjectURL(url)
+    let { width, height } = img
+    if (width > MAX_DIMENSAO || height > MAX_DIMENSAO) {
+      const escala = MAX_DIMENSAO / Math.max(width, height)
+      width = Math.round(width * escala)
+      height = Math.round(height * escala)
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = width; canvas.height = height
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, width, height)
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) { resolve(file); return } // fallback: manda o original se a compressão falhar
+        resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }))
+      },
+      'image/jpeg', QUALIDADE_JPEG
+    )
+  }
+  img.onerror = () => { URL.revokeObjectURL(url); resolve(file) } // fallback: manda o original se não conseguir ler
+  img.src = url
+})
+
 // ── Formulário (componente estável fora do Despesas, evita perda de foco) ──
 function DespesaForm({ form, setForm, obras, obraMap }) {
   const s = k => v => setForm(f => ({ ...f, [k]: v }))
@@ -158,8 +191,9 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     if (!file) return
     setUploadErr(null); setUploading(true)
     try {
-      const mediaType = file.type || 'image/jpeg'
-      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file) })
+      const fileFinal = await compressImage(file)
+      const mediaType = fileFinal.type || 'image/jpeg'
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(fileFinal) })
       const ext = await extractPix(b64, mediaType)
       setPreview({
         obras_selecionadas: [], item: ext.item || '',
