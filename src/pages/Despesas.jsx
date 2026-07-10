@@ -233,10 +233,8 @@ export default function Despesas({ despesas, setDespesas, obras }) {
 
   const removeAll = async () => {
     if (despesas.length === 0) return
-    const ok1 = confirm(`⚠️ Isso vai apagar TODOS os ${despesas.length} lançamentos de TODAS as obras, de todos os usuários. Essa ação não pode ser desfeita.\n\nDeseja continuar?`)
-    if (!ok1) return
-    const digitado = prompt('Para confirmar, digite EXCLUIR em maiúsculas:')
-    if (digitado !== 'EXCLUIR') { alert('Cancelado.'); return }
+    const ok = confirm(`⚠️ Isso vai apagar TODOS os ${despesas.length} lançamentos de TODAS as obras, de todos os usuários. Essa ação não pode ser desfeita.\n\nDeseja continuar?`)
+    if (!ok) return
     try {
       await deleteAllDespesas()
       setDespesas([])
