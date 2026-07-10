@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>THE Engenharia</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#16a34a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="THE Obras">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+      }
+
+      // Helper to read shared file from IndexedDB
+      window.getSharedFile = () => new Promise((resolve) => {
+        const req = indexedDB.open('the-obras', 1)
+        req.onupgradeneeded = () => req.result.createObjectStore('shared')
+        req.onsuccess = () => {
+          const db = req.result
+          const tx = db.transaction('shared', 'readwrite')
+          const store = tx.objectStore('shared')
+          const get = store.get('pending')
+          get.onsuccess = () => {
+            if (get.result) {
+              store.delete('pending')
+              resolve(get.result)
+            } else {
+              resolve(null)
+            }
+          }
+          get.onerror = () => resolve(null)
+        }
+        req.onerror = () => resolve(null)
+      })
+    </script>
+  </body>
+</html>
