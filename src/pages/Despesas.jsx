@@ -3,7 +3,7 @@ import { fmt, fmtDate, parseCur, todayStr, obraColor, QUALIDADES } from '../lib/
 import { extractPix } from '../lib/claude'
 import { saveDespesa, updateDespesa, deleteDespesa, deleteAllDespesas } from '../lib/supabase'
 import { Tag, Modal, Btn, FI, Card, EmptyState, TotalBar } from '../components/UI'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 const emptyForm = {
   obras_selecionadas: [], item: '', fornecedor: '', responsavel: 'THE',
@@ -275,31 +275,129 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     } catch (e) { alert('Erro ao excluir tudo: ' + e.message) }
   }
 
-  const exportExcel = () => {
-    const wb = XLSX.utils.book_new()
+  const exportExcel = async () => {
+    const THIN = { style: 'thin' }
+    const BORDER_ALL = { top: THIN, left: THIN, bottom: THIN, right: THIN }
+    const FONT = { name: 'Calibri', size: 11 }
+    const CURRENCY_FMT = '_-"R$"\\ * #,##0.00_-;\\-"R$"\\ * #,##0.00_-;_-"R$"\\ * "-"??_-;_-@_-'
+    const DATE_FMT = 'mm-dd-yy'
+    const COL_WIDTHS = [8.89, 23.44, 19.55, 14, 10.56, 14.11, 15.33] // A..G
+
+    // Converte 'YYYY-MM-DD' em Date local (evita deslocamento de fuso horário)
+    const parseDataLocal = (s) => {
+      if (!s) return null
+      const [y, m, d] = s.split('-').map(Number)
+      return new Date(y, (m || 1) - 1, d || 1)
+    }
+
+    const styleHeaderRow = (ws, rowNum, values) => {
+      const row = ws.getRow(rowNum)
+      values.forEach((v, i) => {
+        const cell = row.getCell(i + 2) // começa na coluna B
+        cell.value = v
+        cell.font = { ...FONT, bold: true }
+        cell.alignment = { horizontal: 'center', vertical: 'center' }
+        cell.border = BORDER_ALL
+      })
+    }
+
+    const buildSheet = (wb, sheetName, rows) => {
+      const ws = wb.addWorksheet(sheetName.substring(0, 31))
+      COL_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w })
+
+      // Título mesclado B2:G2
+      ws.mergeCells('B2:G2')
+      const titleCell = ws.getCell('B2')
+      titleCell.value = 'Planilha de Gastos'
+      titleCell.font = { ...FONT, bold: true }
+      titleCell.alignment = { horizontal: 'center', vertical: 'center' }
+      for (let c = 2; c <= 7; c++) ws.getRow(2).getCell(c).border = BORDER_ALL
+
+      // Cabeçalho na linha 3
+      styleHeaderRow(ws, 3, ['Descrição', 'Fornecedor', 'Qualidade', 'Data', 'Valor', 'Observação'])
+
+      // Linhas de dados, ordenadas por data crescente
+      const ordenadas = [...rows].sort((a, b) => (a.data || '').localeCompare(b.data || ''))
+      let r = 4
+      ordenadas.forEach(d => {
+        const row = ws.getRow(r)
+        const dataLocal = parseDataLocal(d.data)
+        const valores = [d.item || '', d.fornecedor || '', d.qualidade || '', dataLocal, d.valor || 0, d.observacao || '']
+        valores.forEach((v, i) => {
+          const cell = row.getCell(i + 2)
+          cell.value = v
+          cell.font = FONT
+          cell.alignment = { horizontal: 'center', vertical: 'center', wrapText: true }
+          cell.border = BORDER_ALL
+          if (i === 3) cell.numFmt = DATE_FMT
+          if (i === 4) cell.numFmt = CURRENCY_FMT
+        })
+        r++
+      })
+
+      // Linha de total
+      if (ordenadas.length > 0) {
+        const row = ws.getRow(r)
+        row.getCell(5).value = 'TOTAL'
+        row.getCell(5).font = { ...FONT, bold: true }
+        row.getCell(5).alignment = { horizontal: 'center', vertical: 'center' }
+        row.getCell(5).border = BORDER_ALL
+        const totalCell = row.getCell(6)
+        totalCell.value = { formula: `SUM(F4:F${r - 1})` }
+        totalCell.font = { ...FONT, bold: true }
+        totalCell.alignment = { horizontal: 'center', vertical: 'center' }
+        totalCell.border = BORDER_ALL
+        totalCell.numFmt = CURRENCY_FMT
+        row.getCell(2).border = BORDER_ALL
+        row.getCell(3).border = BORDER_ALL
+        row.getCell(4).border = BORDER_ALL
+        row.getCell(7).border = BORDER_ALL
+      }
+      return ws
+    }
+
+    const wb = new ExcelJS.Workbook()
     const allObras = [...new Set(despesas.map(d => d.obra_codigo || 'SEM'))]
     allObras.forEach(cod => {
       const rows = despesas.filter(d => (d.obra_codigo || 'SEM') === cod)
-      const wsData = [['Descrição', 'Fornecedor', 'Qualidade', 'Data', 'Valor', 'Observação']]
-      rows.forEach(d => wsData.push([d.item || '', d.fornecedor || '', d.qualidade || '', fmtDate(d.data), d.valor || 0, d.observacao || '']))
-      if (rows.length > 0) wsData.push(['', '', '', 'TOTAL', { f: `SUM(E2:E${rows.length + 1})` }, ''])
-      const ws = XLSX.utils.aoa_to_sheet(wsData)
-      ws['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 28 }]
-      for (let r = 1; r <= rows.length + 1; r++) {
-        const ref = XLSX.utils.encode_cell({ r, c: 4 })
-        if (ws[ref]) ws[ref].z = '"R$" #,##0.00'
-      }
-      XLSX.utils.book_append_sheet(wb, ws, (obraMap[cod]?.nome || cod).substring(0, 31))
+      buildSheet(wb, obraMap[cod]?.nome || cod, rows)
     })
-    const resumo = [['Obra', 'Qtd', 'Total (R$)'], ...allObras.map(cod => { const rows = despesas.filter(d => (d.obra_codigo || 'SEM') === cod); return [obraMap[cod]?.nome || cod, rows.length, rows.reduce((s, d) => s + (d.valor || 0), 0)] })]
-    const wsR = XLSX.utils.aoa_to_sheet(resumo)
-    wsR['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 16 }]
-    for (let r = 1; r <= allObras.length; r++) {
-      const ref = XLSX.utils.encode_cell({ r, c: 2 })
-      if (wsR[ref]) wsR[ref].z = '"R$" #,##0.00'
+
+    // Aba de resumo
+    const wsR = wb.addWorksheet('Resumo')
+    wsR.getColumn(1).width = 24; wsR.getColumn(2).width = 10; wsR.getColumn(3).width = 18
+    styleHeaderRowSimples(wsR, 1, ['Obra', 'Qtd', 'Total (R$)'])
+    let rr = 2
+    allObras.forEach(cod => {
+      const rows = despesas.filter(d => (d.obra_codigo || 'SEM') === cod)
+      const total = rows.reduce((s, d) => s + (d.valor || 0), 0)
+      const row = wsR.getRow(rr)
+      row.getCell(1).value = obraMap[cod]?.nome || cod
+      row.getCell(2).value = rows.length
+      row.getCell(3).value = total
+      row.getCell(3).numFmt = CURRENCY_FMT;
+      [1, 2, 3].forEach(c => { row.getCell(c).font = FONT; row.getCell(c).border = BORDER_ALL; row.getCell(c).alignment = { horizontal: 'center', vertical: 'center' } })
+      rr++
+    })
+
+    function styleHeaderRowSimples(ws, rowNum, values) {
+      const row = ws.getRow(rowNum)
+      values.forEach((v, i) => {
+        const cell = row.getCell(i + 1)
+        cell.value = v
+        cell.font = { ...FONT, bold: true }
+        cell.alignment = { horizontal: 'center', vertical: 'center' }
+        cell.border = BORDER_ALL
+      })
     }
-    XLSX.utils.book_append_sheet(wb, wsR, 'Resumo')
-    XLSX.writeFile(wb, `Despesas_${todayStr()}.xlsx`)
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `Despesas_${todayStr()}.xlsx`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   const filtered = despesas.filter(d => {
