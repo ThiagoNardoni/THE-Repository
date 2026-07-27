@@ -30,32 +30,43 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
       generationConfig: { temperature: 0 }
     })
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
+    // Lista de modelos, em ordem de preferência. Se o primeiro estiver
+    // sobrecarregado (erro 503 / "high demand"), tenta o próximo automaticamente.
+    const MODELOS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite']
+    const TENTATIVAS_POR_MODELO = 2
 
-    // Tenta até 3 vezes se o Gemini estiver sobrecarregado (erro 503 / "high demand")
-    const maxTentativas = 3
-    let data
-    for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body
-      })
-      data = await response.json()
+    let data, ultimoErroSobrecarga = false
+    outer:
+    for (const modelo of MODELOS) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`
+      for (let tentativa = 1; tentativa <= TENTATIVAS_POR_MODELO; tentativa++) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body
+        })
+        data = await response.json()
 
-      const sobrecarregado = response.status === 503 ||
-        (data?.error?.message || '').toLowerCase().includes('high demand') ||
-        (data?.error?.message || '').toLowerCase().includes('overloaded')
+        const sobrecarregado = response.status === 503 ||
+          (data?.error?.message || '').toLowerCase().includes('high demand') ||
+          (data?.error?.message || '').toLowerCase().includes('overloaded')
 
-      if (!sobrecarregado) break
+        if (!sobrecarregado) break outer // deu certo (ou é outro tipo de erro) — para por aqui
+        ultimoErroSobrecarga = true
 
-      if (tentativa < maxTentativas) {
-        const espera = tentativa * 1500 // 1.5s, depois 3s
-        await new Promise(r => setTimeout(r, espera))
+        if (tentativa < TENTATIVAS_POR_MODELO) {
+          await new Promise(r => setTimeout(r, tentativa * 1200)) // 1.2s antes de tentar de novo no mesmo modelo
+        }
       }
+      // esgotou as tentativas nesse modelo por sobrecarga → tenta o próximo modelo da lista
     }
 
-    if (data.error) return res.status(500).json({ error: data.error.message })
+    if (data.error) {
+      const msg = ultimoErroSobrecarga
+        ? 'Os servidores do Gemini estão sobrecarregados no momento (isso é algo do lado do Google, acontece bastante logo após lançamento de modelo novo). Tente novamente em alguns minutos.'
+        : data.error.message
+      return res.status(500).json({ error: msg })
+    }
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
     const clean = text.replace(/```json|```/g, '').trim()
     return res.status(200).json({ result: clean })
