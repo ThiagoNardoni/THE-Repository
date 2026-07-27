@@ -3,18 +3,23 @@ import { fmt, fmtDate, obraColor, QUALIDADES } from '../lib/utils'
 import { Card, StatCard, Tag } from '../components/UI'
 
 export default function Dashboard({ despesas, entradas, obras }) {
-  const [filterObra, setFilterObra] = useState('todas')
+  const [obrasExcluidas, setObrasExcluidas] = useState([])
+  const [showObraFilter, setShowObraFilter] = useState(false)
   const [filterQual, setFilterQual] = useState('todas')
   const [filterMes, setFilterMes] = useState('')
 
   const obraMap = useMemo(() => Object.fromEntries(obras.map(o => [o.codigo, o])), [obras])
 
+  const toggleObra = (codigo) => {
+    setObrasExcluidas(p => p.includes(codigo) ? p.filter(c => c !== codigo) : [...p, codigo])
+  }
+
   const filtered = useMemo(() => despesas.filter(d => {
-    const obraOk = filterObra === 'todas' || d.obra_codigo === filterObra
+    const obraOk = !obrasExcluidas.includes(d.obra_codigo)
     const qualOk = filterQual === 'todas' || d.qualidade === filterQual
     const mesOk = !filterMes || d.data?.startsWith(filterMes)
     return obraOk && qualOk && mesOk
-  }), [despesas, filterObra, filterQual, filterMes])
+  }), [despesas, obrasExcluidas, filterQual, filterMes])
 
   const totalDespesas = filtered.reduce((s, d) => s + (d.valor || 0), 0)
   const totalEntradas = entradas.reduce((s, e) => s + (e.valor || 0), 0)
@@ -70,13 +75,34 @@ export default function Dashboard({ despesas, entradas, obras }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Filtros */}
-      <div style={{ background: '#f8fafc', borderRadius: 14, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+      <div style={{ background: '#f8fafc', borderRadius: 14, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', position: 'relative' }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: '#64748b' }}>🔍 Filtros:</span>
-        <select value={filterObra} onChange={e => setFilterObra(e.target.value)}
-          style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }}>
-          <option value="todas">Todas as obras</option>
-          {obras.map(o => <option key={o.codigo} value={o.codigo}>{o.codigo} – {o.nome}</option>)}
-        </select>
+
+        {/* Seletor de obras (múltipla escolha) */}
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setShowObraFilter(s => !s)}
+            style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            🏗️ {obrasExcluidas.length === 0 ? 'Todas as obras' : `${obras.length - obrasExcluidas.length} de ${obras.length} obras`} ▾
+          </button>
+          {showObraFilter && (
+            <div style={{ position: 'absolute', top: '110%', left: 0, zIndex: 20, background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 12, padding: 10, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,.12)' }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                <button onClick={() => setObrasExcluidas([])} style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', background: 'none', border: 'none', cursor: 'pointer' }}>Marcar todas</button>
+                <button onClick={() => setObrasExcluidas(obras.map(o => o.codigo))} style={{ fontSize: 11, fontWeight: 700, color: '#e11d48', background: 'none', border: 'none', cursor: 'pointer' }}>Desmarcar todas</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                {obras.map(o => (
+                  <label key={o.codigo} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#0f172a', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!obrasExcluidas.includes(o.codigo)} onChange={() => toggleObra(o.codigo)} />
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: obraColor(obras, o.codigo), flexShrink: 0 }} />
+                    {o.codigo} – {o.nome}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <select value={filterQual} onChange={e => setFilterQual(e.target.value)}
           style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }}>
           <option value="todas">Todas as qualidades</option>
@@ -84,8 +110,8 @@ export default function Dashboard({ despesas, entradas, obras }) {
         </select>
         <input type="month" value={filterMes} onChange={e => setFilterMes(e.target.value)}
           style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }} />
-        {(filterObra !== 'todas' || filterQual !== 'todas' || filterMes) && (
-          <button onClick={() => { setFilterObra('todas'); setFilterQual('todas'); setFilterMes('') }}
+        {(obrasExcluidas.length > 0 || filterQual !== 'todas' || filterMes) && (
+          <button onClick={() => { setObrasExcluidas([]); setFilterQual('todas'); setFilterMes('') }}
             style={{ fontSize: 12, color: '#e11d48', background: 'none', border: '1px solid #fecdd3', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700 }}>
             ✕ Limpar filtros
           </button>
@@ -105,7 +131,7 @@ export default function Dashboard({ despesas, entradas, obras }) {
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>📊 Por Obra</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {obras.map(o => {
+            {obras.filter(o => !obrasExcluidas.includes(o.codigo)).map(o => {
               const st = obraStats[o.codigo] || { total: 0, count: 0 }
               const color = obraColor(obras, o.codigo)
               const pct = totalDespesas > 0 ? (st.total / totalDespesas) * 100 : 0
