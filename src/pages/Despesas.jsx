@@ -56,6 +56,14 @@ const compressImage = (file) => new Promise((resolve, reject) => {
 })
 
 // ── Formulário (componente estável fora do Despesas, evita perda de foco) ──
+// Uma linha "label: valor" usada no card de lançamento (layout em coluna única, bom pra celular)
+const CampoLinha = ({ label, children, last }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '5px 0', borderBottom: last ? 'none' : '1px solid #f1f5f9' }}>
+    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', flexShrink: 0 }}>{label}</span>
+    <span style={{ fontSize: 13, color: '#0f172a', textAlign: 'right' }}>{children}</span>
+  </div>
+)
+
 function DespesaForm({ form, setForm, obras, obraMap }) {
   const s = k => v => setForm(f => ({ ...f, [k]: v }))
   const obras_sel = form.obras_selecionadas || []
@@ -582,28 +590,28 @@ export default function Despesas({ despesas, setDespesas, obras }) {
             </Card>
           )
           return (
-            <Card key={d.id} style={{ display: 'flex', gap: 14, padding: '14px 16px 14px 20px', position: 'relative', overflow: 'hidden' }}>
+            <Card key={d.id} style={{ padding: '14px 16px 10px 20px', position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, background: color, borderRadius: '5px 0 0 5px' }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-                  {d.obra_codigo && <Tag label={`${d.obra_codigo} · ${obraMap[d.obra_codigo]?.nome || ''}`} color={color} />}
-                  {d.qualidade && <Tag label={d.qualidade} color="#f59e0b" />}
-                  {d.obras_codigos?.length > 1 && <Tag label={`÷${d.obras_codigos.length} obras`} color="#7c3aed" />}
-                  <Tag label={d.origem === 'pix' ? 'PIX' : 'Manual'} color={d.origem === 'pix' ? '#0284c7' : '#64748b'} />
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 2 }}>{d.item || '—'}</div>
-                {d.fornecedor && <div style={{ fontSize: 13, color: '#64748b' }}>👤 {d.fornecedor}</div>}
-                {d.observacao && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>💬 {d.observacao}</div>}
-                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{fmtDate(d.data)}</div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag label={d.origem === 'pix' ? 'PIX' : d.origem === 'importacao' ? 'Importado' : 'Manual'} color={d.origem === 'pix' ? '#0284c7' : d.origem === 'importacao' ? '#16a34a' : '#64748b'} />
+                <button onClick={() => { setEditId(d.id); setEditForm({ ...d, qualidade_outro: '' }) }} style={ibtn}>✏️</button>
+                <button onClick={() => remove(d.id)} style={{ ...ibtn, color: '#e11d48' }}>🗑️</button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 90 }}>
-                <div style={{ fontWeight: 800, fontSize: 16, color: '#e11d48' }}>{fmt(d.valor)}</div>
-                {d.obras_codigos?.length > 1 && <div style={{ fontSize: 11, color: '#94a3b8' }}>total {fmt(d.rateio_total)}</div>}
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  <button onClick={() => { setEditId(d.id); setEditForm({ ...d, qualidade_outro: '' }) }} style={ibtn}>✏️</button>
-                  <button onClick={() => remove(d.id)} style={{ ...ibtn, color: '#e11d48' }}>🗑️</button>
-                </div>
-              </div>
+
+              <CampoLinha label="Obra">
+                {d.obra_codigo ? `${d.obra_codigo} · ${obraMap[d.obra_codigo]?.nome || ''}` : '—'}
+                {d.obras_codigos?.length > 1 && <span style={{ color: '#7c3aed', fontWeight: 700 }}> (÷{d.obras_codigos.length} obras)</span>}
+              </CampoLinha>
+              <CampoLinha label="Qualidade">{d.qualidade || '—'}</CampoLinha>
+              <CampoLinha label="Valor">
+                <b style={{ color: '#e11d48', fontSize: 15 }}>{fmt(d.valor)}</b>
+                {d.obras_codigos?.length > 1 && <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 6 }}>(total {fmt(d.rateio_total)})</span>}
+              </CampoLinha>
+              <CampoLinha label="Descrição">{d.item || '—'}</CampoLinha>
+              <CampoLinha label="Fornecedor">{d.fornecedor || '—'}</CampoLinha>
+              <CampoLinha label="Data">{fmtDate(d.data)}</CampoLinha>
+              <CampoLinha label="Observação" last>{d.observacao || '—'}</CampoLinha>
             </Card>
           )
         })}
