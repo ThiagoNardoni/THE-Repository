@@ -325,6 +325,8 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   }
 
 
+  // Save rows - one per obra
+  const saveRows = async (form, origem) => {
     const base = {
       item: form.item, fornecedor: form.fornecedor, responsavel: form.responsavel,
       qualidade: getQualFinal(form), data: form.data, observacao: form.observacao, origem,
