@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { fmt, fmtDate, parseCur, todayStr, obraColor, QUALIDADES } from '../lib/utils'
 import { extractPix } from '../lib/claude'
-import { saveDespesa, updateDespesa, deleteDespesa, deleteAllDespesas } from '../lib/supabase'
+import { saveDespesa, updateDespesa, deleteDespesa, deleteAllDespesas, saveDespesasBulk } from '../lib/supabase'
 import { Tag, Modal, Btn, FI, Card, EmptyState, TotalBar } from '../components/UI'
 import ExcelJS from 'exceljs'
 
@@ -182,6 +182,12 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   const [filterMes, setFilterMes] = useState('')
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({})
+  const [showImport, setShowImport] = useState(false)
+  const [importObra, setImportObra] = useState('')
+  const [importRows, setImportRows] = useState(null)
+  const [importErr, setImportErr] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const importFileRef = useRef()
 
   const obraMap = Object.fromEntries(obras.map(o => [o.codigo, o]))
   const getQualFinal = (form) => form.qualidade === 'Outro' ? (form.qualidade_outro || '') : form.qualidade
@@ -220,8 +226,105 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     checkShared()
   }, [handleFile])
 
-  // Save rows - one per obra
-  const saveRows = async (form, origem) => {
+  // ── Importar planilha de lançamentos já existente ─────────────────────────
+  // Aceita o mesmo layout do modelo: título na linha 2, cabeçalho na linha 3
+  // (Descrição, Fornecedor, Qualidade, Data, Valor, Observação) a partir da coluna B,
+  // mas também tenta achar o cabeçalho automaticamente se estiver em outra linha/coluna.
+  const excelDateParaISO = (v) => {
+    if (v == null || v === '') return null
+    if (v instanceof Date) {
+      const y = v.getFullYear(), m = String(v.getMonth() + 1).padStart(2, '0'), d = String(v.getDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    if (typeof v === 'number') {
+      // número de série do Excel (dias desde 1899-12-30)
+      const dt = new Date(Math.round((v - 25569) * 86400 * 1000))
+      const y = dt.getUTCFullYear(), m = String(dt.getUTCMonth() + 1).padStart(2, '0'), d = String(dt.getUTCDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    if (typeof v === 'string') {
+      const s = v.trim()
+      let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/) // dd/mm/yyyy
+      if (m) { let [, d, mo, y] = m; if (y.length === 2) y = '20' + y; return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}` }
+      m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) // yyyy-mm-dd
+      if (m) { const [, y, mo, d] = m; return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}` }
+    }
+    return null
+  }
+
+  const parseImportFile = async (file) => {
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(await file.arrayBuffer())
+    const ws = wb.worksheets[0]
+    if (!ws) throw new Error('Planilha vazia ou em formato não reconhecido.')
+
+    // Procura a linha de cabeçalho (a que contém "Descrição" e "Valor")
+    let headerRow = null, colMap = {}
+    for (let r = 1; r <= Math.min(ws.rowCount, 20); r++) {
+      const row = ws.getRow(r)
+      const found = {}
+      row.eachCell((cell, col) => {
+        const v = String(cell.value || '').trim().toLowerCase()
+        if (v.startsWith('descri')) found.item = col
+        else if (v.startsWith('fornecedor')) found.fornecedor = col
+        else if (v.startsWith('qualidade')) found.qualidade = col
+        else if (v.startsWith('data')) found.data = col
+        else if (v.startsWith('valor')) found.valor = col
+        else if (v.startsWith('observa')) found.observacao = col
+      })
+      if (found.item && found.valor) { headerRow = r; colMap = found; break }
+    }
+    if (!headerRow) throw new Error('Não encontrei as colunas esperadas (Descrição, Fornecedor, Qualidade, Data, Valor, Observação). Confira se a planilha segue o modelo.')
+
+    const linhas = []
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r)
+      const item = row.getCell(colMap.item).value
+      const itemStr = String(item || '').trim()
+      if (!itemStr || /^total$/i.test(itemStr)) continue // pula linhas em branco ou de TOTAL
+      const valorCell = row.getCell(colMap.valor).value
+      const valor = typeof valorCell === 'object' && valorCell?.result != null ? valorCell.result : valorCell
+      if (typeof valor !== 'number') continue // pula linhas sem valor numérico válido
+      linhas.push({
+        item: itemStr,
+        fornecedor: colMap.fornecedor ? String(row.getCell(colMap.fornecedor).value || '').trim() : '',
+        qualidade: colMap.qualidade ? String(row.getCell(colMap.qualidade).value || '').trim() : '',
+        data: colMap.data ? excelDateParaISO(row.getCell(colMap.data).value) : null,
+        valor,
+        observacao: colMap.observacao ? String(row.getCell(colMap.observacao).value || '').trim() : '',
+      })
+    }
+    return linhas
+  }
+
+  const handleImportFile = async (file) => {
+    if (!file) return
+    setImportErr(null); setImportRows(null)
+    try {
+      const linhas = await parseImportFile(file)
+      if (linhas.length === 0) throw new Error('Nenhum lançamento encontrado nessa planilha.')
+      setImportRows(linhas)
+    } catch (e) { setImportErr(e.message) }
+  }
+
+  const confirmImport = async () => {
+    if (!importObra || !importRows || importRows.length === 0) return
+    setImporting(true)
+    try {
+      const paraSalvar = importRows.map(l => ({
+        item: l.item, fornecedor: l.fornecedor, qualidade: l.qualidade,
+        data: l.data || todayStr(), valor: l.valor, observacao: l.observacao,
+        responsavel: 'THE', origem: 'importacao', obra_codigo: importObra, obras_codigos: [importObra],
+      }))
+      const salvos = await saveDespesasBulk(paraSalvar)
+      setDespesas(p => [...salvos, ...p])
+      setShowImport(false); setImportRows(null); setImportObra(''); setImportErr(null)
+      if (importFileRef.current) importFileRef.current.value = ''
+    } catch (e) { setImportErr('Erro ao importar: ' + e.message) }
+    setImporting(false)
+  }
+
+
     const base = {
       item: form.item, fornecedor: form.fornecedor, responsavel: form.responsavel,
       qualidade: getQualFinal(form), data: form.data, observacao: form.observacao, origem,
@@ -432,6 +535,7 @@ export default function Despesas({ despesas, setDespesas, obras }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <Btn onClick={() => setShowManual(true)} outline color="#16a34a">+ Manual</Btn>
         <Btn onClick={exportExcel} outline color="#0284c7" small disabled={despesas.length === 0}>⬇️ Excel</Btn>
+        <Btn onClick={() => setShowImport(true)} outline color="#16a34a" small>📥 Importar Planilha</Btn>
         <Btn onClick={removeAll} outline color="#e11d48" small disabled={despesas.length === 0}>🗑️ Excluir Tudo</Btn>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <select value={filterObra} onChange={e => setFilterObra(e.target.value)}
@@ -519,6 +623,39 @@ export default function Despesas({ despesas, setDespesas, obras }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <DespesaForm form={manual} setForm={setManual} obras={obras} obraMap={obraMap} />
           <Btn onClick={addManual} disabled={!manual.valor || !manual.item} full>Adicionar Despesa</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showImport} onClose={() => { setShowImport(false); setImportRows(null); setImportErr(null); setImportObra('') }} title="📥 Importar Planilha de Lançamentos" wide>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: '#1e40af' }}>
+            A planilha deve seguir o modelo padrão, com as colunas <b>Descrição, Fornecedor, Qualidade, Data, Valor</b> e <b>Observação</b>.
+          </div>
+
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6, display: 'block' }}>Obra de destino</label>
+            <select value={importObra} onChange={e => setImportObra(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}>
+              <option value="">Selecione a obra...</option>
+              {obras.map(o => <option key={o.codigo} value={o.codigo}>{o.nome}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6, display: 'block' }}>Arquivo (.xlsx)</label>
+            <input ref={importFileRef} type="file" accept=".xlsx" onChange={e => handleImportFile(e.target.files[0])} style={{ width: '100%' }} />
+          </div>
+
+          {importErr && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: '#b91c1c' }}>{importErr}</div>}
+
+          {importRows && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: '#15803d' }}>
+              ✅ {importRows.length} lançamento{importRows.length > 1 ? 's' : ''} encontrado{importRows.length > 1 ? 's' : ''} na planilha, pronto{importRows.length > 1 ? 's' : ''} para importar.
+            </div>
+          )}
+
+          <Btn onClick={confirmImport} disabled={!importObra || !importRows || importing} full>
+            {importing ? 'Importando...' : `✅ Confirmar Importação${importRows ? ` (${importRows.length})` : ''}`}
+          </Btn>
         </div>
       </Modal>
     </div>
