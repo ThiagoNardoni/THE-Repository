@@ -6,13 +6,26 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 // ── Despesas ──────────────────────────────────────────────────────────────
+// O Supabase limita a 1000 linhas por consulta por padrão. Como já passamos
+// desse número de lançamentos, buscamos em "páginas" até trazer tudo.
 export async function getDespesas() {
-  const { data, error } = await supabase
-    .from('despesas')
-    .select('*')
-    .order('data', { ascending: false })
-  if (error) throw error
-  return data || []
+  const TAMANHO_PAGINA = 1000
+  let todas = []
+  let pagina = 0
+  while (true) {
+    const inicio = pagina * TAMANHO_PAGINA
+    const fim = inicio + TAMANHO_PAGINA - 1
+    const { data, error } = await supabase
+      .from('despesas')
+      .select('*')
+      .order('data', { ascending: false })
+      .range(inicio, fim)
+    if (error) throw error
+    todas = todas.concat(data || [])
+    if (!data || data.length < TAMANHO_PAGINA) break
+    pagina++
+  }
+  return todas
 }
 
 export async function saveDespesa(d) {
