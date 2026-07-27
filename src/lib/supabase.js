@@ -64,13 +64,25 @@ export async function saveDespesasBulk(rows) {
 }
 
 // ── Entradas (fluxo de caixa) ─────────────────────────────────────────────
+// Mesma correção de paginação aplicada em getDespesas, por precaução.
 export async function getEntradas() {
-  const { data, error } = await supabase
-    .from('entradas')
-    .select('*')
-    .order('data', { ascending: false })
-  if (error) throw error
-  return data || []
+  const TAMANHO_PAGINA = 1000
+  let todas = []
+  let pagina = 0
+  while (true) {
+    const inicio = pagina * TAMANHO_PAGINA
+    const fim = inicio + TAMANHO_PAGINA - 1
+    const { data, error } = await supabase
+      .from('entradas')
+      .select('*')
+      .order('data', { ascending: false })
+      .range(inicio, fim)
+    if (error) throw error
+    todas = todas.concat(data || [])
+    if (!data || data.length < TAMANHO_PAGINA) break
+    pagina++
+  }
+  return todas
 }
 
 export async function saveEntrada(e) {
@@ -90,13 +102,25 @@ export async function deleteEntrada(id) {
 }
 
 // ── Mão de obra ───────────────────────────────────────────────────────────
+// Mesma correção de paginação aplicada em getDespesas, por precaução.
 export async function getMaoDeObra() {
-  const { data, error } = await supabase
-    .from('mao_de_obra')
-    .select('*')
-    .order('data', { ascending: false })
-  if (error) throw error
-  return data || []
+  const TAMANHO_PAGINA = 1000
+  let todas = []
+  let pagina = 0
+  while (true) {
+    const inicio = pagina * TAMANHO_PAGINA
+    const fim = inicio + TAMANHO_PAGINA - 1
+    const { data, error } = await supabase
+      .from('mao_de_obra')
+      .select('*')
+      .order('data', { ascending: false })
+      .range(inicio, fim)
+    if (error) throw error
+    todas = todas.concat(data || [])
+    if (!data || data.length < TAMANHO_PAGINA) break
+    pagina++
+  }
+  return todas
 }
 
 export async function saveMaoDeObra(m) {
