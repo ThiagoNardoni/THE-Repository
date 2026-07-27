@@ -37,6 +37,19 @@ export async function deleteAllDespesas() {
   if (error) throw error
 }
 
+// Insere várias despesas de uma vez (usado na importação de planilhas), em lotes de 200
+export async function saveDespesasBulk(rows) {
+  const TAMANHO_LOTE = 200
+  const salvos = []
+  for (let i = 0; i < rows.length; i += TAMANHO_LOTE) {
+    const lote = rows.slice(i, i + TAMANHO_LOTE)
+    const { data, error } = await supabase.from('despesas').insert(lote).select()
+    if (error) throw error
+    salvos.push(...(data || []))
+  }
+  return salvos
+}
+
 // ── Entradas (fluxo de caixa) ─────────────────────────────────────────────
 export async function getEntradas() {
   const { data, error } = await supabase
