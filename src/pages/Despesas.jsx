@@ -148,7 +148,7 @@ function DespesaForm({ form, setForm, obras, obraMap }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Qualidade */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em' }}>Qualidade</label>
@@ -167,11 +167,10 @@ function DespesaForm({ form, setForm, obras, obraMap }) {
         </div>
 
         <FI label="Valor Total (R$) *" value={form.valor || ''} onChange={updateValor} placeholder="5600,00" />
-        <FI label="Descrição / Item *" value={form.item || ''} onChange={s('item')} span />
+        <FI label="Descrição / Item *" value={form.item || ''} onChange={s('item')} />
         <FI label="Fornecedor (quem recebeu)" value={form.fornecedor || ''} onChange={s('fornecedor')} />
-        <FI label="Responsável (quem pagou)" value={form.responsavel || ''} onChange={s('responsavel')} />
         <FI label="Data" type="date" value={form.data || ''} onChange={s('data')} />
-        <FI label="Observação" value={form.observacao || ''} onChange={s('observacao')} span />
+        <FI label="Observação" value={form.observacao || ''} onChange={s('observacao')} />
       </div>
     </div>
   )
