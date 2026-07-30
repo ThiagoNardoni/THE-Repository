@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { fmt, fmtDate, parseCur, todayStr, obraColor, QUALIDADES } from '../lib/utils'
 import { extractPix } from '../lib/claude'
-import { saveDespesa, updateDespesa, deleteDespesa, deleteAllDespesas, saveDespesasBulk } from '../lib/supabase'
+import { saveDespesa, updateDespesa, deleteDespesa, deleteAllDespesas, deleteDespesasPorIds, saveDespesasBulk } from '../lib/supabase'
 import { Tag, Modal, Btn, FI, Card, EmptyState, TotalBar } from '../components/UI'
 import ExcelJS from 'exceljs'
 
@@ -378,13 +378,31 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   }
 
   const removeAll = async () => {
-    if (despesas.length === 0) return
-    const ok = confirm(`⚠️ Isso vai apagar TODOS os ${despesas.length} lançamentos de TODAS as obras, de todos os usuários. Essa ação não pode ser desfeita.\n\nDeseja continuar?`)
+    // Respeita o filtro de obra/mês que estiver ativo na tela
+    const alvo = despesas.filter(d => {
+      const obraOk = filterObra === 'todas' || (d.obra_codigo || 'SEM') === filterObra
+      const mesOk = !filterMes || d.data?.startsWith(filterMes)
+      return obraOk && mesOk
+    })
+    if (alvo.length === 0) return
+    const temFiltro = filterObra !== 'todas' || !!filterMes
+    const nomeObraFiltro = filterObra !== 'todas' ? (obraMap[filterObra]?.nome || filterObra) : null
+
+    const msg = temFiltro
+      ? `⚠️ Isso vai apagar os ${alvo.length} lançamentos filtrados${nomeObraFiltro ? ` da obra "${nomeObraFiltro}"` : ''}${filterMes ? ` (mês ${filterMes})` : ''}. Essa ação não pode ser desfeita.\n\nDeseja continuar?`
+      : `⚠️ Isso vai apagar TODOS os ${alvo.length} lançamentos de TODAS as obras, de todos os usuários. Essa ação não pode ser desfeita.\n\nDeseja continuar?`
+    const ok = confirm(msg)
     if (!ok) return
+
     try {
-      await deleteAllDespesas()
-      setDespesas([])
-    } catch (e) { alert('Erro ao excluir tudo: ' + e.message) }
+      if (temFiltro) {
+        await deleteDespesasPorIds(alvo.map(d => d.id))
+      } else {
+        await deleteAllDespesas()
+      }
+      const idsRemovidos = new Set(alvo.map(d => d.id))
+      setDespesas(p => p.filter(x => !idsRemovidos.has(x.id)))
+    } catch (e) { alert('Erro ao excluir: ' + e.message) }
   }
 
   const exportExcel = async () => {
@@ -545,7 +563,9 @@ export default function Despesas({ despesas, setDespesas, obras }) {
         <Btn onClick={() => setShowManual(true)} outline color="#16a34a">+ Manual</Btn>
         <Btn onClick={exportExcel} outline color="#0284c7" small disabled={despesas.length === 0}>⬇️ Excel</Btn>
         <Btn onClick={() => setShowImport(true)} outline color="#16a34a" small>📥 Importar Planilha</Btn>
-        <Btn onClick={removeAll} outline color="#e11d48" small disabled={despesas.length === 0}>🗑️ Excluir Tudo</Btn>
+        <Btn onClick={removeAll} outline color="#e11d48" small disabled={despesas.length === 0}>
+          {filterObra !== 'todas' || filterMes ? `🗑️ Excluir Filtrados (${filtered.length})` : '🗑️ Excluir Tudo'}
+        </Btn>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <select value={filterObra} onChange={e => setFilterObra(e.target.value)}
             style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }}>
