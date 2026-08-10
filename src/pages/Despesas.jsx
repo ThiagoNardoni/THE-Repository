@@ -185,7 +185,8 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   const [preview, setPreview] = useState(null)
   const [showManual, setShowManual] = useState(false)
   const [manual, setManual] = useState(emptyForm)
-  const [filterObra, setFilterObra] = useState('todas')
+  const [obrasExcluidas, setObrasExcluidas] = useState([])
+  const [showObraFilter, setShowObraFilter] = useState(false)
   const [filterMes, setFilterMes] = useState('')
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({})
@@ -378,18 +379,20 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   }
 
   const removeAll = async () => {
-    // Respeita o filtro de obra/mês que estiver ativo na tela
+    // Respeita o filtro de obra(s)/mês que estiver ativo na tela
     const alvo = despesas.filter(d => {
-      const obraOk = filterObra === 'todas' || (d.obra_codigo || 'SEM') === filterObra
+      const obraOk = !obrasExcluidas.includes(d.obra_codigo || 'SEM')
       const mesOk = !filterMes || d.data?.startsWith(filterMes)
       return obraOk && mesOk
     })
     if (alvo.length === 0) return
-    const temFiltro = filterObra !== 'todas' || !!filterMes
-    const nomeObraFiltro = filterObra !== 'todas' ? (obraMap[filterObra]?.nome || filterObra) : null
+    const temFiltro = obrasExcluidas.length > 0 || !!filterMes
+    const obrasIncluidasNomes = temFiltro && obrasExcluidas.length > 0
+      ? [...new Set(alvo.map(d => obraMap[d.obra_codigo]?.nome || d.obra_codigo || 'Sem obra'))].join(', ')
+      : null
 
     const msg = temFiltro
-      ? `⚠️ Isso vai apagar os ${alvo.length} lançamentos filtrados${nomeObraFiltro ? ` da obra "${nomeObraFiltro}"` : ''}${filterMes ? ` (mês ${filterMes})` : ''}. Essa ação não pode ser desfeita.\n\nDeseja continuar?`
+      ? `⚠️ Isso vai apagar os ${alvo.length} lançamentos filtrados${obrasIncluidasNomes ? ` (obras: ${obrasIncluidasNomes})` : ''}${filterMes ? ` (mês ${filterMes})` : ''}. Essa ação não pode ser desfeita.\n\nDeseja continuar?`
       : `⚠️ Isso vai apagar TODOS os ${alvo.length} lançamentos de TODAS as obras, de todos os usuários. Essa ação não pode ser desfeita.\n\nDeseja continuar?`
     const ok = confirm(msg)
     if (!ok) return
@@ -465,6 +468,11 @@ export default function Despesas({ despesas, setDespesas, obras }) {
         r++
       })
 
+      // Filtro automático do Excel nas colunas do cabeçalho (linha 3 até a última linha de dados)
+      if (ordenadas.length > 0) {
+        ws.autoFilter = { from: { row: 3, column: 2 }, to: { row: r - 1, column: 7 } }
+      }
+
       // Linha de total
       if (ordenadas.length > 0) {
         const row = ws.getRow(r)
@@ -530,8 +538,12 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     URL.revokeObjectURL(url)
   }
 
+  const toggleObraFiltro = (codigo) => {
+    setObrasExcluidas(p => p.includes(codigo) ? p.filter(c => c !== codigo) : [...p, codigo])
+  }
+
   const filtered = despesas.filter(d => {
-    const obraOk = filterObra === 'todas' || (d.obra_codigo || 'SEM') === filterObra
+    const obraOk = !obrasExcluidas.includes(d.obra_codigo || 'SEM')
     const mesOk = !filterMes || d.data?.startsWith(filterMes)
     return obraOk && mesOk
   })
@@ -564,15 +576,36 @@ export default function Despesas({ despesas, setDespesas, obras }) {
         <Btn onClick={exportExcel} outline color="#0284c7" small disabled={despesas.length === 0}>⬇️ Excel</Btn>
         <Btn onClick={() => setShowImport(true)} outline color="#16a34a" small>📥 Importar Planilha</Btn>
         <Btn onClick={removeAll} outline color="#e11d48" small disabled={despesas.length === 0}>
-          {filterObra !== 'todas' || filterMes ? `🗑️ Excluir Filtrados (${filtered.length})` : '🗑️ Excluir Tudo'}
+          {obrasExcluidas.length > 0 || filterMes ? `🗑️ Excluir Filtrados (${filtered.length})` : '🗑️ Excluir Tudo'}
         </Btn>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <select value={filterObra} onChange={e => setFilterObra(e.target.value)}
-            style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }}>
-            <option value="todas">Todas as obras</option>
-            {obras.map(o => <option key={o.codigo} value={o.codigo}>{o.codigo} – {o.nome}</option>)}
-            <option value="SEM">Sem obra</option>
-          </select>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowObraFilter(s => !s)}
+              style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              🏗️ {obrasExcluidas.length === 0 ? 'Todas as obras' : `${obras.length + 1 - obrasExcluidas.length} de ${obras.length + 1} selecionadas`} ▾
+            </button>
+            {showObraFilter && (
+              <div style={{ position: 'absolute', top: '110%', right: 0, zIndex: 20, background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 12, padding: 10, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,.12)' }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                  <button onClick={() => setObrasExcluidas([])} style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', background: 'none', border: 'none', cursor: 'pointer' }}>Marcar todas</button>
+                  <button onClick={() => setObrasExcluidas([...obras.map(o => o.codigo), 'SEM'])} style={{ fontSize: 11, fontWeight: 700, color: '#e11d48', background: 'none', border: 'none', cursor: 'pointer' }}>Desmarcar todas</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                  {obras.map(o => (
+                    <label key={o.codigo} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#0f172a', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!obrasExcluidas.includes(o.codigo)} onChange={() => toggleObraFiltro(o.codigo)} />
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: obraColor(obras, o.codigo), flexShrink: 0 }} />
+                      {o.codigo} – {o.nome}
+                    </label>
+                  ))}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#64748b', cursor: 'pointer', borderTop: '1px solid #f1f5f9', paddingTop: 6, marginTop: 2 }}>
+                    <input type="checkbox" checked={!obrasExcluidas.includes('SEM')} onChange={() => toggleObraFiltro('SEM')} />
+                    Sem obra
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
           <input type="month" value={filterMes} onChange={e => setFilterMes(e.target.value)}
             style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '7px 12px', fontSize: 13, background: '#fff', fontFamily: 'inherit', outline: 'none' }} />
         </div>
