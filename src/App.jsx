@@ -14,7 +14,7 @@ const TABS = [
 ]
 
 export default function App() {
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setTab] = useState('despesas')
   const [despesas, setDespesas] = useState([])
   const [entradas, setEntradas] = useState([])
   const [obras] = useState(OBRAS_DEFAULT)
