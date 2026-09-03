@@ -1,6 +1,6 @@
 export async function extractPix(base64, mediaType) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 45000) // 45s
+  const timeoutId = setTimeout(() => controller.abort(), 58000) // 58s (o servidor tem até 60s pra tentar os modelos)
   try {
     const res = await fetch('/api/gemini', {
       method: 'POST',
