@@ -367,7 +367,7 @@ export default function Despesas({ despesas, setDespesas, obras }) {
 
   const saveEdit = async () => {
     try {
-      const d = { item: editForm.item, fornecedor: editForm.fornecedor, responsavel: editForm.responsavel, qualidade: getQualFinal(editForm), valor: parseCur(editForm.valor), data: editForm.data, observacao: editForm.observacao, obra_codigo: editForm.obra_codigo }
+      const d = { item: editForm.item, fornecedor: editForm.fornecedor, responsavel: editForm.responsavel, qualidade: getQualFinal(editForm), valor: parseCur(editForm.valor), data: editForm.data, observacao: editForm.observacao, obra_codigo: editForm.obra_codigo || null, obras_codigos: editForm.obra_codigo ? [editForm.obra_codigo] : [] }
       await updateDespesa(editId, d)
       setDespesas(p => p.map(x => x.id === editId ? { ...x, ...d } : x)); setEditId(null)
     } catch (e) { alert('Erro: ' + e.message) }
@@ -620,6 +620,14 @@ export default function Despesas({ despesas, setDespesas, obras }) {
           if (editId === d.id) return (
             <Card key={d.id} style={{ border: '2px solid #16a34a' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em' }}>Obra</label>
+                  <select value={editForm.obra_codigo || ''} onChange={e => setEditForm(f => ({ ...f, obra_codigo: e.target.value || null }))}
+                    style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '9px 12px', fontSize: 14, fontFamily: 'inherit', background: '#fafafa', appearance: 'none' }}>
+                    <option value=''>— sem obra —</option>
+                    {obras.map(o => <option key={o.codigo} value={o.codigo}>{o.codigo} – {o.nome}</option>)}
+                  </select>
+                </div>
                 <FI label="Descrição / Item" value={editForm.item || ''} onChange={v => setEditForm(f => ({ ...f, item: v }))} />
                 <FI label="Fornecedor" value={editForm.fornecedor || ''} onChange={v => setEditForm(f => ({ ...f, fornecedor: v }))} />
                 <FI label="Valor (R$)" value={String(editForm.valor ?? '')} onChange={v => setEditForm(f => ({ ...f, valor: v }))} />
