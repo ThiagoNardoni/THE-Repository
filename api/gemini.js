@@ -32,7 +32,8 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
 
     // Lista de modelos, em ordem de preferência. Se o primeiro estiver
     // sobrecarregado (erro 503 / "high demand"), tenta o próximo automaticamente.
-    const MODELOS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite']
+    // Atualizado para priorizar os modelos mais recentes do Google (menos concorridos).
+    const MODELOS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
     const TENTATIVAS_POR_MODELO = 1
 
     let data, ultimoErroSobrecarga = false
