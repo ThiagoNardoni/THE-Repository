@@ -2,13 +2,25 @@
 // quais modelos existem no momento (ex: a própria consulta falhar).
 const MODELOS_RESERVA = ['gemini-flash-latest', 'gemini-3.5-flash-lite']
 
+// fetch com tempo-limite: se demorar demais, desiste e segue pro próximo passo,
+// em vez de deixar uma única tentativa travada consumir todo o tempo disponível.
+async function fetchComTimeout(url, options, ms) {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(id)
+  }
+}
+
 // Consulta a própria API do Gemini pra descobrir quais modelos existem HOJE
 // e devolve os mais adequados (Flash, capazes de ler imagem), do mais novo
 // pro mais antigo. Assim, quando o Google lançar um modelo novo, o site
 // passa a usá-lo sozinho, sem precisar editar o código.
 async function getModelosDisponiveis() {
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`)
+    const resp = await fetchComTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`, {}, 6000)
     const data = await resp.json()
     const ids = (data.models || [])
       .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
@@ -26,7 +38,8 @@ async function getModelosDisponiveis() {
     const previews = ids.filter(id => !estavel(id)).sort((a, b) => versao(b) - versao(a))
 
     const ordenados = [...principais, ...leves, ...previews]
-    return ordenados.length > 0 ? ordenados.slice(0, 5) : MODELOS_RESERVA
+    // Só os 3 primeiros: o suficiente pra ter alternativas, sem deixar o tempo total estourar
+    return ordenados.length > 0 ? ordenados.slice(0, 3) : MODELOS_RESERVA
   } catch {
     return MODELOS_RESERVA
   }
@@ -72,11 +85,11 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
     for (const modelo of MODELOS) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`
       try {
-        const response = await fetch(url, {
+        const response = await fetchComTimeout(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body
-        })
+        }, 15000) // no máximo 15s por modelo — se demorar mais, desiste e tenta o próximo
         data = await response.json()
 
         if (!data.error) break // deu certo — para por aqui
@@ -87,7 +100,7 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
           (data.error.message || '').toLowerCase().includes('overloaded')
         // não deu certo (modelo sobrecarregado, não encontrado, etc.) → tenta o próximo modelo da lista
       } catch (e) {
-        ultimoErro = { message: e.message }
+        ultimoErro = { message: e.name === 'AbortError' ? 'Tempo esgotado' : e.message }
       }
     }
 
