@@ -231,6 +231,12 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   // Check for file shared via WhatsApp / Web Share Target
   useEffect(() => {
     const checkShared = async () => {
+      // 🔧 Diagnóstico temporário: se o app abriu com QUALQUER parâmetro na URL
+      // que não seja o esperado, mostra ele na tela pra sabermos o que o Android mandou.
+      if (location.search && !(location.search.includes('opened=share') || location.search.includes('share=true'))) {
+        setUploadErr(`[Diagnóstico] O app abriu com esta URL: ${location.href}`)
+        return
+      }
       if (!(location.search.includes('opened=share') || location.search.includes('share=true'))) return
       history.replaceState({}, '', '/')
       try {
