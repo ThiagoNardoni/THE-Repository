@@ -31,16 +31,17 @@
           const db = req.result
           const tx = db.transaction('shared', 'readwrite')
           const store = tx.objectStore('shared')
-          const get = store.get('pending')
-          get.onsuccess = () => {
-            if (get.result) {
-              store.delete('pending')
-              resolve(get.result)
+          const getFile = store.get('pending')
+          const getStatus = store.get('pending_status')
+          tx.oncomplete = () => {
+            if (getFile.result || getStatus.result) {
+              store.delete('pending'); store.delete('pending_status')
+              resolve({ file: getFile.result || null, status: getStatus.result || null })
             } else {
               resolve(null)
             }
           }
-          get.onerror = () => resolve(null)
+          tx.onerror = () => resolve(null)
         }
         req.onerror = () => resolve(null)
       })
