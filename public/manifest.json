@@ -34,7 +34,7 @@
       "files": [
         {
           "name": "file",
-          "accept": ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"]
+          "accept": ["image/*", "application/pdf", ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic"]
         }
       ]
     }
