@@ -240,13 +240,19 @@ export default function Despesas({ despesas, setDespesas, obras }) {
         }
         // Tenta algumas vezes: pode haver uma pequena demora até o arquivo
         // ficar disponível no IndexedDB logo após o compartilhamento.
-        let file = null
-        for (let tentativa = 0; tentativa < 4 && !file; tentativa++) {
+        let resultado = null
+        for (let tentativa = 0; tentativa < 4 && !resultado; tentativa++) {
           if (tentativa > 0) await new Promise(r => setTimeout(r, 400))
-          file = await window.getSharedFile()
+          resultado = await window.getSharedFile()
         }
-        if (file) {
-          handleFile(file)
+        if (resultado?.file) {
+          handleFile(resultado.file)
+        } else if (resultado?.status && resultado.status !== 'ok') {
+          if (resultado.status === 'sem_arquivo') {
+            setUploadErr('O app do banco não enviou o comprovante no formato esperado. Tente salvar o comprovante como imagem/PDF primeiro e depois enviar pelo botão manual.')
+          } else {
+            setUploadErr(`Erro ao receber o comprovante compartilhado (${resultado.status}). Tente enviar manualmente pelo botão de enviar comprovante.`)
+          }
         } else {
           setUploadErr('O comprovante compartilhado não chegou até o app. Tente novamente ou selecione o arquivo manualmente pelo botão de enviar comprovante.')
         }
