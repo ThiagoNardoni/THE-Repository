@@ -231,12 +231,27 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   // Check for file shared via WhatsApp / Web Share Target
   useEffect(() => {
     const checkShared = async () => {
-      if (location.search.includes('opened=share') || location.search.includes('share=true')) {
-        history.replaceState({}, '', '/')
-        if (window.getSharedFile) {
-          const file = await window.getSharedFile()
-          if (file) handleFile(file)
+      if (!(location.search.includes('opened=share') || location.search.includes('share=true'))) return
+      history.replaceState({}, '', '/')
+      try {
+        if (!window.getSharedFile) {
+          setUploadErr('Não consegui abrir o arquivo compartilhado (recurso indisponível neste navegador). Tente selecionar o arquivo manualmente pelo botão de enviar comprovante.')
+          return
         }
+        // Tenta algumas vezes: pode haver uma pequena demora até o arquivo
+        // ficar disponível no IndexedDB logo após o compartilhamento.
+        let file = null
+        for (let tentativa = 0; tentativa < 4 && !file; tentativa++) {
+          if (tentativa > 0) await new Promise(r => setTimeout(r, 400))
+          file = await window.getSharedFile()
+        }
+        if (file) {
+          handleFile(file)
+        } else {
+          setUploadErr('O comprovante compartilhado não chegou até o app. Tente novamente ou selecione o arquivo manualmente pelo botão de enviar comprovante.')
+        }
+      } catch (e) {
+        setUploadErr(`Erro ao processar o arquivo compartilhado: ${e.message}`)
       }
     }
     checkShared()
