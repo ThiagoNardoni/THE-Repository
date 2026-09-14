@@ -18,16 +18,26 @@ self.addEventListener('fetch', e => {
 
   if (e.request.method === 'POST' && url.searchParams.get('share') === 'true') {
     e.respondWith((async () => {
+      let status = 'ok'
       try {
         const formData = await e.request.formData()
         const file = formData.get('file')
 
-        if (file) {
+        if (file && file.size > 0) {
           // Store file in IndexedDB so the app can pick it up
           const db = await openDB()
-          await storeFile(db, file)
+          await storeFile(db, file, status)
+        } else {
+          status = 'sem_arquivo' // o app do banco não enviou nenhum arquivo no campo esperado
+          const db = await openDB()
+          await storeFile(db, null, status)
         }
       } catch (err) {
+        status = 'erro: ' + err.message
+        try {
+          const db = await openDB()
+          await storeFile(db, null, status)
+        } catch {}
         console.error('Share target error:', err)
       }
       // Redirect to app
@@ -46,10 +56,11 @@ function openDB() {
   })
 }
 
-function storeFile(db, file) {
+function storeFile(db, file, status) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('shared', 'readwrite')
     tx.objectStore('shared').put(file, 'pending')
+    tx.objectStore('shared').put(status, 'pending_status')
     tx.oncomplete = resolve
     tx.onerror = reject
   })
