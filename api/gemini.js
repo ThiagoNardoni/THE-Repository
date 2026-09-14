@@ -1,3 +1,37 @@
+// Lista fixa usada só se, por algum motivo, não conseguirmos consultar
+// quais modelos existem no momento (ex: a própria consulta falhar).
+const MODELOS_RESERVA = ['gemini-flash-latest', 'gemini-3.5-flash-lite']
+
+// Consulta a própria API do Gemini pra descobrir quais modelos existem HOJE
+// e devolve os mais adequados (Flash, capazes de ler imagem), do mais novo
+// pro mais antigo. Assim, quando o Google lançar um modelo novo, o site
+// passa a usá-lo sozinho, sem precisar editar o código.
+async function getModelosDisponiveis() {
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`)
+    const data = await resp.json()
+    const ids = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace('models/', ''))
+      .filter(id => /^gemini-\d/.test(id) && id.includes('flash') && !/image|audio|native|tts|robotics|embed/.test(id))
+
+    if (ids.length === 0) return MODELOS_RESERVA
+
+    const versao = (id) => { const m = id.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0 }
+    const estavel = (id) => !/preview|exp/i.test(id)
+
+    // Prioridade: Flash "completo" estável > Flash-Lite estável > previews/experimentais — sempre do mais novo pro mais antigo
+    const principais = ids.filter(id => !id.includes('lite') && estavel(id)).sort((a, b) => versao(b) - versao(a))
+    const leves = ids.filter(id => id.includes('lite') && estavel(id)).sort((a, b) => versao(b) - versao(a))
+    const previews = ids.filter(id => !estavel(id)).sort((a, b) => versao(b) - versao(a))
+
+    const ordenados = [...principais, ...leves, ...previews]
+    return ordenados.length > 0 ? ordenados.slice(0, 5) : MODELOS_RESERVA
+  } catch {
+    return MODELOS_RESERVA
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
@@ -30,17 +64,14 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
       generationConfig: { temperature: 0 }
     })
 
-    // Lista de modelos, em ordem de preferência. Se o primeiro estiver
-    // sobrecarregado (erro 503 / "high demand"), tenta o próximo automaticamente.
-    // Atualizado para priorizar os modelos mais recentes do Google (menos concorridos).
-    const MODELOS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
-    const TENTATIVAS_POR_MODELO = 1
+    // Descobre os modelos disponíveis agora (em vez de uma lista fixa no código).
+    // Se um falhar por QUALQUER motivo (sobrecarga, nome inválido, etc.), tenta o próximo.
+    const MODELOS = await getModelosDisponiveis()
 
-    let data, ultimoErroSobrecarga = false
-    outer:
+    let data, ultimoErro = null, ultimoErroSobrecarga = false
     for (const modelo of MODELOS) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`
-      for (let tentativa = 1; tentativa <= TENTATIVAS_POR_MODELO; tentativa++) {
+      try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -48,24 +79,22 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
         })
         data = await response.json()
 
-        const sobrecarregado = response.status === 503 ||
-          (data?.error?.message || '').toLowerCase().includes('high demand') ||
-          (data?.error?.message || '').toLowerCase().includes('overloaded')
+        if (!data.error) break // deu certo — para por aqui
 
-        if (!sobrecarregado) break outer // deu certo (ou é outro tipo de erro) — para por aqui
-        ultimoErroSobrecarga = true
-
-        if (tentativa < TENTATIVAS_POR_MODELO) {
-          await new Promise(r => setTimeout(r, tentativa * 1200)) // 1.2s antes de tentar de novo no mesmo modelo
-        }
+        ultimoErro = data.error
+        ultimoErroSobrecarga = response.status === 503 ||
+          (data.error.message || '').toLowerCase().includes('high demand') ||
+          (data.error.message || '').toLowerCase().includes('overloaded')
+        // não deu certo (modelo sobrecarregado, não encontrado, etc.) → tenta o próximo modelo da lista
+      } catch (e) {
+        ultimoErro = { message: e.message }
       }
-      // esgotou as tentativas nesse modelo por sobrecarga → tenta o próximo modelo da lista
     }
 
-    if (data.error) {
+    if (data?.error) {
       const msg = ultimoErroSobrecarga
         ? 'Os servidores do Gemini estão sobrecarregados no momento (isso é algo do lado do Google, acontece bastante logo após lançamento de modelo novo). Tente novamente em alguns minutos.'
-        : data.error.message
+        : (ultimoErro?.message || data.error.message)
       return res.status(500).json({ error: msg })
     }
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
