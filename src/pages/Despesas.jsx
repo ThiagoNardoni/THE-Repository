@@ -55,6 +55,14 @@ const compressImage = (file) => new Promise((resolve, reject) => {
   img.src = url
 })
 
+// Mesma compressão acima, mas com um tempo-limite de segurança: se travar
+// processando a imagem (ex: foto muito grande/pesada), desiste e usa o arquivo
+// original em vez de deixar o app "pendurado" pra sempre.
+const compressImageComTimeout = (file) => Promise.race([
+  compressImage(file),
+  new Promise(resolve => setTimeout(() => resolve(file), 15000)) // 15s: desiste e usa o original
+])
+
 // ── Formulário (componente estável fora do Despesas, evita perda de foco) ──
 // Uma linha "label: valor" usada no card de lançamento (layout em coluna única, bom pra celular)
 const CampoLinha = ({ label, children, last }) => (
@@ -205,9 +213,9 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     if (!file) return
     setUploadErr(null); setUploading(true)
     try {
-      const fileFinal = await compressImage(file)
+      const fileFinal = await compressImageComTimeout(file)
       const mediaType = fileFinal.type || 'image/jpeg'
-      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(fileFinal) })
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = () => rej(new Error('Não foi possível ler o arquivo selecionado.')); r.readAsDataURL(fileFinal) })
       const ext = await extractPix(b64, mediaType)
       setPreview({
         obras_selecionadas: [], item: ext.item || '',
@@ -554,7 +562,7 @@ export default function Despesas({ despesas, setDespesas, obras }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div onClick={() => fileRef.current?.click()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }} onDragOver={e => e.preventDefault()}
         style={{ border: '2.5px dashed #86efac', borderRadius: 18, background: '#f0fdf4', padding: '24px 20px', textAlign: 'center', cursor: 'pointer' }}>
-        <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; e.target.value = ''; handleFile(f) }} />
         {uploading ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 28, height: 28, border: '4px solid #86efac', borderTopColor: '#16a34a', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
