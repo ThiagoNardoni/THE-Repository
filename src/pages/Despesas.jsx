@@ -205,13 +205,17 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   const [importing, setImporting] = useState(false)
   const importFileRef = useRef()
   const [debugInfo, setDebugInfo] = useState(null)
+  const [debugLog, setDebugLog] = useState([])
   const [testandoIA, setTestandoIA] = useState(false)
   const [testeIAResultado, setTesteIAResultado] = useState(null)
+
+  const logDebug = (msg) => setDebugLog(p => [...p, `${new Date().toLocaleTimeString('pt-BR')} — ${msg}`])
 
   // 🔧 Diagnóstico temporário: registra, toda vez que o app abre, a URL exata
   // que foi usada — assim conseguimos ver se um compartilhamento chegou até aqui.
   useEffect(() => {
     setDebugInfo({ url: window.location.href, hora: new Date().toLocaleTimeString('pt-BR') })
+    logDebug(`App/Despesas montado. URL: ${window.location.href}`)
   }, [])
 
   // 🔧 Teste manual: verifica se o site consegue se comunicar com a IA do Google,
@@ -256,27 +260,30 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   // Check for file shared via WhatsApp / Web Share Target
   useEffect(() => {
     const checkShared = async () => {
-      // 🔧 Diagnóstico temporário: se o app abriu com QUALQUER parâmetro na URL
-      // que não seja o esperado, mostra ele na tela pra sabermos o que o Android mandou.
-      if (location.search && !(location.search.includes('opened=share') || location.search.includes('share=true'))) {
-        setUploadErr(`[Diagnóstico] O app abriu com esta URL: ${location.href}`)
+      logDebug(`checkShared iniciado. location.search = "${location.search}"`)
+      if (!(location.search.includes('opened=share') || location.search.includes('share=true'))) {
+        logDebug('Não é uma abertura por compartilhamento. Encerrando.')
         return
       }
-      if (!(location.search.includes('opened=share') || location.search.includes('share=true'))) return
+      logDebug('Detectado abertura por compartilhamento (opened=share).')
       history.replaceState({}, '', '/')
       try {
         if (!window.getSharedFile) {
+          logDebug('ERRO: window.getSharedFile não existe.')
           setUploadErr('Não consegui abrir o arquivo compartilhado (recurso indisponível neste navegador). Tente selecionar o arquivo manualmente pelo botão de enviar comprovante.')
           return
         }
+        logDebug('window.getSharedFile existe. Buscando arquivo no IndexedDB...')
         // Tenta algumas vezes: pode haver uma pequena demora até o arquivo
         // ficar disponível no IndexedDB logo após o compartilhamento.
         let resultado = null
         for (let tentativa = 0; tentativa < 4 && !resultado; tentativa++) {
           if (tentativa > 0) await new Promise(r => setTimeout(r, 400))
           resultado = await window.getSharedFile()
+          logDebug(`Tentativa ${tentativa + 1}: resultado = ${resultado ? JSON.stringify({ status: resultado.status, temArquivo: !!resultado.file, tamanho: resultado.file?.size, tipo: resultado.file?.type }) : 'null'}`)
         }
         if (resultado?.file) {
+          logDebug('Arquivo encontrado! Chamando handleFile...')
           handleFile(resultado.file)
         } else if (resultado?.status && resultado.status !== 'ok') {
           if (resultado.status === 'sem_arquivo') {
@@ -285,9 +292,11 @@ export default function Despesas({ despesas, setDespesas, obras }) {
             setUploadErr(`Erro ao receber o comprovante compartilhado (${resultado.status}). Tente enviar manualmente pelo botão de enviar comprovante.`)
           }
         } else {
+          logDebug('Nenhum resultado encontrado após 4 tentativas.')
           setUploadErr('O comprovante compartilhado não chegou até o app. Tente novamente ou selecione o arquivo manualmente pelo botão de enviar comprovante.')
         }
       } catch (e) {
+        logDebug(`EXCEÇÃO capturada: ${e.message}`)
         setUploadErr(`Erro ao processar o arquivo compartilhado: ${e.message}`)
       }
     }
@@ -619,6 +628,11 @@ export default function Despesas({ despesas, setDespesas, obras }) {
           <Btn onClick={testarConexaoIA} outline small disabled={testandoIA}>{testandoIA ? 'Testando...' : '🔧 Testar conexão com a IA'}</Btn>
           {testeIAResultado && <span style={{ color: testeIAResultado.ok ? '#16a34a' : '#e11d48', fontWeight: 600 }}>{testeIAResultado.msg}</span>}
         </div>
+        {debugLog.length > 0 && (
+          <div style={{ background: '#0f172a', color: '#86efac', fontFamily: 'monospace', fontSize: 11, padding: 10, borderRadius: 8, maxHeight: 220, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {debugLog.map((linha, i) => <div key={i}>{linha}</div>)}
+          </div>
+        )}
       </div>
 
       <div onClick={() => fileRef.current?.click()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }} onDragOver={e => e.preventDefault()}
