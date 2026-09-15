@@ -1,4 +1,5 @@
 const CACHE = 'the-obras-v2'
+const SHARE_CACHE = 'the-obras-share'
 
 self.addEventListener('install', e => {
   self.skipWaiting()
@@ -7,7 +8,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE && k !== SHARE_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   )
 })
@@ -20,23 +21,27 @@ self.addEventListener('fetch', e => {
     e.respondWith((async () => {
       let status = 'ok'
       try {
+        const cache = await caches.open(SHARE_CACHE)
         const formData = await e.request.formData()
         const file = formData.get('file')
 
         if (file && file.size > 0) {
-          // Store file in IndexedDB so the app can pick it up
-          const db = await openDB()
-          await storeFile(db, file, status)
+          // Guarda o arquivo no Cache Storage, pra o app buscar assim que abrir
+          await cache.put('/__shared-file', new Response(file, {
+            headers: {
+              'Content-Type': file.type || 'application/octet-stream',
+              'X-File-Name': encodeURIComponent(file.name || 'comprovante')
+            }
+          }))
         } else {
           status = 'sem_arquivo' // o app do banco não enviou nenhum arquivo no campo esperado
-          const db = await openDB()
-          await storeFile(db, null, status)
         }
+        await cache.put('/__shared-status', new Response(status))
       } catch (err) {
         status = 'erro: ' + err.message
         try {
-          const db = await openDB()
-          await storeFile(db, null, status)
+          const cache = await caches.open(SHARE_CACHE)
+          await cache.put('/__shared-status', new Response(status))
         } catch {}
         console.error('Share target error:', err)
       }
@@ -45,23 +50,3 @@ self.addEventListener('fetch', e => {
     })())
   }
 })
-
-// IndexedDB helpers
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('the-obras', 1)
-    req.onupgradeneeded = () => req.result.createObjectStore('shared')
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = reject
-  })
-}
-
-function storeFile(db, file, status) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('shared', 'readwrite')
-    tx.objectStore('shared').put(file, 'pending')
-    tx.objectStore('shared').put(status, 'pending_status')
-    tx.oncomplete = resolve
-    tx.onerror = reject
-  })
-}
