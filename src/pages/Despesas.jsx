@@ -286,8 +286,8 @@ export default function Despesas({ despesas, setDespesas, obras }) {
           logDebug('Arquivo encontrado! Chamando handleFile...')
           handleFile(resultado.file)
         } else if (resultado?.status && resultado.status !== 'ok') {
-          if (resultado.status === 'sem_arquivo') {
-            setUploadErr('O app do banco não enviou o comprovante no formato esperado. Tente salvar o comprovante como imagem/PDF primeiro e depois enviar pelo botão manual.')
+          if (resultado.status.startsWith('sem_arquivo')) {
+            setUploadErr(`O app não enviou o comprovante no formato esperado. Tente salvar o comprovante como imagem/PDF primeiro e depois enviar pelo botão manual. [${resultado.status}]`)
           } else {
             setUploadErr(`Erro ao receber o comprovante compartilhado (${resultado.status}). Tente enviar manualmente pelo botão de enviar comprovante.`)
           }
