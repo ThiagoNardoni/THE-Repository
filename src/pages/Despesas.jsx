@@ -204,6 +204,31 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   const [importErr, setImportErr] = useState(null)
   const [importing, setImporting] = useState(false)
   const importFileRef = useRef()
+  const [debugInfo, setDebugInfo] = useState(null)
+  const [testandoIA, setTestandoIA] = useState(false)
+  const [testeIAResultado, setTesteIAResultado] = useState(null)
+
+  // 🔧 Diagnóstico temporário: registra, toda vez que o app abre, a URL exata
+  // que foi usada — assim conseguimos ver se um compartilhamento chegou até aqui.
+  useEffect(() => {
+    setDebugInfo({ url: window.location.href, hora: new Date().toLocaleTimeString('pt-BR') })
+  }, [])
+
+  // 🔧 Teste manual: verifica se o site consegue se comunicar com a IA do Google,
+  // sem depender de nenhum comprovante real — usa uma imagem mínima de teste.
+  const testarConexaoIA = async () => {
+    setTestandoIA(true); setTesteIAResultado(null)
+    const IMAGEM_TESTE_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+    try {
+      const inicio = Date.now()
+      await extractPix(IMAGEM_TESTE_1PX, 'image/png')
+      const segundos = ((Date.now() - inicio) / 1000).toFixed(1)
+      setTesteIAResultado({ ok: true, msg: `✅ Comunicação com a IA funcionando! (respondeu em ${segundos}s)` })
+    } catch (e) {
+      setTesteIAResultado({ ok: false, msg: `❌ Falha na comunicação com a IA: ${e.message}` })
+    }
+    setTestandoIA(false)
+  }
 
   const obraMap = Object.fromEntries(obras.map(o => [o.codigo, o]))
   const getQualFinal = (form) => form.qualidade === 'Outro' ? (form.qualidade_outro || '') : form.qualidade
@@ -587,6 +612,15 @@ export default function Despesas({ despesas, setDespesas, obras }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* 🔧 Painel de diagnóstico temporário */}
+      <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 12, padding: '10px 14px', fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div>🔧 <b>Diagnóstico</b> — App aberto às {debugInfo?.hora} com a URL: <code style={{ wordBreak: 'break-all' }}>{debugInfo?.url}</code></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Btn onClick={testarConexaoIA} outline small disabled={testandoIA}>{testandoIA ? 'Testando...' : '🔧 Testar conexão com a IA'}</Btn>
+          {testeIAResultado && <span style={{ color: testeIAResultado.ok ? '#16a34a' : '#e11d48', fontWeight: 600 }}>{testeIAResultado.msg}</span>}
+        </div>
+      </div>
+
       <div onClick={() => fileRef.current?.click()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }} onDragOver={e => e.preventDefault()}
         style={{ border: '2.5px dashed #86efac', borderRadius: 18, background: '#f0fdf4', padding: '24px 20px', textAlign: 'center', cursor: 'pointer' }}>
         <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; e.target.value = ''; handleFile(f) }} />
