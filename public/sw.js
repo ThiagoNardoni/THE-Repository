@@ -34,7 +34,13 @@ self.addEventListener('fetch', e => {
             }
           }))
         } else {
-          status = 'sem_arquivo' // o app do banco não enviou nenhum arquivo no campo esperado
+          // Diagnóstico: lista os campos que realmente vieram no compartilhamento
+          const campos = [...formData.keys()].map(k => {
+            const v = formData.get(k)
+            const desc = (v && typeof v === 'object' && 'size' in v) ? `arquivo(${v.size}b,${v.type})` : String(v).slice(0, 30)
+            return `${k}=${desc}`
+          }).join(' | ')
+          status = `sem_arquivo [${campos || 'nenhum campo'}]`
         }
         await cache.put('/__shared-status', new Response(status))
       } catch (err) {
