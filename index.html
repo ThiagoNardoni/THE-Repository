@@ -23,28 +23,43 @@
         navigator.serviceWorker.register('/sw.js')
       }
 
-      // Helper to read shared file from IndexedDB
-      window.getSharedFile = () => new Promise((resolve) => {
-        const req = indexedDB.open('the-obras', 1)
-        req.onupgradeneeded = () => req.result.createObjectStore('shared')
-        req.onsuccess = () => {
-          const db = req.result
-          const tx = db.transaction('shared', 'readwrite')
-          const store = tx.objectStore('shared')
-          const getFile = store.get('pending')
-          const getStatus = store.get('pending_status')
-          tx.oncomplete = () => {
-            if (getFile.result || getStatus.result) {
-              store.delete('pending'); store.delete('pending_status')
-              resolve({ file: getFile.result || null, status: getStatus.result || null })
-            } else {
-              resolve(null)
+      // Helper to read shared file from IndexedDB (com tempo-limite embutido,
+      // pra nunca deixar a página esperando pra sempre)
+      window.getSharedFile = () => {
+        const tentativa = new Promise((resolve) => {
+          try {
+            const req = indexedDB.open('the-obras', 1)
+            req.onupgradeneeded = () => req.result.createObjectStore('shared')
+            req.onsuccess = () => {
+              try {
+                const db = req.result
+                const tx = db.transaction('shared', 'readwrite')
+                const store = tx.objectStore('shared')
+                const getFile = store.get('pending')
+                const getStatus = store.get('pending_status')
+                tx.oncomplete = () => {
+                  if (getFile.result || getStatus.result) {
+                    store.delete('pending'); store.delete('pending_status')
+                    resolve({ file: getFile.result || null, status: getStatus.result || null })
+                  } else {
+                    resolve(null)
+                  }
+                }
+                tx.onerror = () => resolve({ file: null, status: 'erro_tx: ' + (tx.error?.message || 'desconhecido') })
+                tx.onabort = () => resolve({ file: null, status: 'tx_abortada' })
+              } catch (err) {
+                resolve({ file: null, status: 'erro_transacao: ' + err.message })
+              }
             }
+            req.onerror = () => resolve({ file: null, status: 'erro_abrir_db: ' + (req.error?.message || 'desconhecido') })
+            req.onblocked = () => resolve({ file: null, status: 'db_bloqueado' })
+          } catch (err) {
+            resolve({ file: null, status: 'erro_geral: ' + err.message })
           }
-          tx.onerror = () => resolve(null)
-        }
-        req.onerror = () => resolve(null)
-      })
+        })
+        const timeout = new Promise((resolve) => setTimeout(() => resolve({ file: null, status: 'timeout_indexeddb' }), 5000))
+        return Promise.race([tentativa, timeout])
+      }
     </script>
   </body>
 </html>
