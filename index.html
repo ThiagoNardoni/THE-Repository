@@ -23,41 +23,34 @@
         navigator.serviceWorker.register('/sw.js')
       }
 
-      // Helper to read shared file from IndexedDB (com tempo-limite embutido,
+      // Helper to read shared file from Cache Storage (com tempo-limite embutido,
       // pra nunca deixar a página esperando pra sempre)
       window.getSharedFile = () => {
-        const tentativa = new Promise((resolve) => {
+        const tentativa = (async () => {
           try {
-            const req = indexedDB.open('the-obras', 1)
-            req.onupgradeneeded = () => req.result.createObjectStore('shared')
-            req.onsuccess = () => {
-              try {
-                const db = req.result
-                const tx = db.transaction('shared', 'readwrite')
-                const store = tx.objectStore('shared')
-                const getFile = store.get('pending')
-                const getStatus = store.get('pending_status')
-                tx.oncomplete = () => {
-                  if (getFile.result || getStatus.result) {
-                    store.delete('pending'); store.delete('pending_status')
-                    resolve({ file: getFile.result || null, status: getStatus.result || null })
-                  } else {
-                    resolve(null)
-                  }
-                }
-                tx.onerror = () => resolve({ file: null, status: 'erro_tx: ' + (tx.error?.message || 'desconhecido') })
-                tx.onabort = () => resolve({ file: null, status: 'tx_abortada' })
-              } catch (err) {
-                resolve({ file: null, status: 'erro_transacao: ' + err.message })
-              }
+            const cache = await caches.open('the-obras-share')
+            const [fileResp, statusResp] = await Promise.all([
+              cache.match('/__shared-file'),
+              cache.match('/__shared-status')
+            ])
+            if (!fileResp && !statusResp) return null
+
+            const status = statusResp ? await statusResp.text() : 'ok'
+            let file = null
+            if (fileResp) {
+              const blob = await fileResp.blob()
+              const nome = decodeURIComponent(fileResp.headers.get('X-File-Name') || 'comprovante')
+              const tipo = fileResp.headers.get('Content-Type') || blob.type
+              file = new File([blob], nome, { type: tipo })
             }
-            req.onerror = () => resolve({ file: null, status: 'erro_abrir_db: ' + (req.error?.message || 'desconhecido') })
-            req.onblocked = () => resolve({ file: null, status: 'db_bloqueado' })
+            await cache.delete('/__shared-file')
+            await cache.delete('/__shared-status')
+            return { file, status }
           } catch (err) {
-            resolve({ file: null, status: 'erro_geral: ' + err.message })
+            return { file: null, status: 'erro_cache: ' + err.message }
           }
-        })
-        const timeout = new Promise((resolve) => setTimeout(() => resolve({ file: null, status: 'timeout_indexeddb' }), 5000))
+        })()
+        const timeout = new Promise((resolve) => setTimeout(() => resolve({ file: null, status: 'timeout_cache' }), 5000))
         return Promise.race([tentativa, timeout])
       }
     </script>
