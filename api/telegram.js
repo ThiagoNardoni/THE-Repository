@@ -95,6 +95,55 @@ async function telegramApi(method, params) {
   return resp.json()
 }
 
+// ── Reconhecimento de obra(s) a partir de texto, com suporte a divisão ─────
+const normalizar = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+
+function acharObra(nomeOuCodigo, obrasDisponiveis) {
+  const alvo = normalizar(nomeOuCodigo)
+  if (!alvo) return null
+  return obrasDisponiveis.find(o =>
+    normalizar(o.codigo) === alvo ||
+    normalizar(o.nome) === alvo ||
+    normalizar(o.nome).includes(alvo) ||
+    alvo.includes(normalizar(o.codigo))
+  ) || null
+}
+
+// Aceita: "BR" | "BR, Feira" | "BR: 600, Feira: 819,00" — separadores por vírgula, ";", quebra de linha ou " e "
+// Retorna null se algum trecho não bater com nenhuma obra cadastrada.
+function parseObrasTexto(texto, obrasDisponiveis) {
+  const partes = (texto || '').split(/[,;\n]| e /i).map(p => p.trim()).filter(Boolean)
+  if (partes.length === 0) return null
+  const resultado = []
+  for (const parte of partes) {
+    let nomeParte = parte, valorParte = null
+    const idx = parte.indexOf(':')
+    if (idx > -1) {
+      nomeParte = parte.slice(0, idx).trim()
+      const numTexto = parte.slice(idx + 1).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(,|$))/g, '').replace(',', '.')
+      const num = parseFloat(numTexto)
+      if (!isNaN(num)) valorParte = num
+    }
+    const achada = acharObra(nomeParte, obrasDisponiveis)
+    if (!achada) return null // algum pedaço não bateu com obra nenhuma → invalida tudo
+    resultado.push({ codigo: achada.codigo, nome: achada.nome, valor: valorParte })
+  }
+  return resultado
+}
+
+// Divide valorTotal entre as obras: usa os valores manuais se TODOS vierem informados,
+// senão divide igualmente (a última obra fica com o resto do arredondamento).
+function calcularRateio(obrasParsed, valorTotal) {
+  const todasComValor = obrasParsed.every(o => o.valor != null)
+  if (todasComValor) return obrasParsed.map(o => ({ codigo: o.codigo, nome: o.nome, valor: Math.round(o.valor * 100) / 100 }))
+  const n = obrasParsed.length
+  const base = Math.floor((valorTotal / n) * 100) / 100
+  return obrasParsed.map((o, i) => ({
+    codigo: o.codigo, nome: o.nome,
+    valor: i < n - 1 ? base : Math.round((valorTotal - base * (n - 1)) * 100) / 100
+  }))
+}
+
 export default async function handler(req, res) {
   // Confere um "segredo" na URL, pra ninguém além do Telegram conseguir chamar esse endpoint
   if (req.query.secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
@@ -114,7 +163,7 @@ export default async function handler(req, res) {
     if (message.text === '/start' || message.text === '/ajuda') {
       await telegramApi('sendMessage', {
         chat_id: chatId,
-        text: '👋 Envie uma foto ou PDF do comprovante de pagamento.\n\nDica: escreva o código ou nome da obra na legenda da foto (ex: "BR") pra eu já lançar na obra certa. Sem legenda, o lançamento entra sem obra e você atribui depois no app.'
+        text: '👋 Envie uma foto ou PDF do comprovante de pagamento.\n\nVocê pode informar a obra na legenda da própria foto, OU numa mensagem separada logo depois — funciona dos dois jeitos:\n• Uma obra: "BR"\n• Dividir entre várias, igualmente: "BR, Feira"\n• Dividir com valores definidos: "BR: 600, Feira: 819"\n\nSem informar a obra, o lançamento entra sem obra e você atribui depois.'
       })
       return res.status(200).json({ ok: true })
     }
@@ -127,6 +176,55 @@ export default async function handler(req, res) {
     } else if (message.document) {
       fileId = message.document.file_id
       mediaType = message.document.mime_type || 'application/octet-stream'
+    }
+
+    // Se veio só texto (sem foto/PDF), tenta usar como o nome/código da(s) obra(s)
+    // pra completar o ÚLTIMO lançamento feito por aqui que ainda está sem obra.
+    // Isso cobre o jeito mais natural de usar: manda a foto, depois manda "BR" (ou "BR, Feira") numa mensagem separada.
+    if (!fileId && message.text) {
+      const { data: pendentes } = await supabase
+        .from('despesas')
+        .select('id, valor, fornecedor, item, data, observacao, responsavel')
+        .eq('origem', 'telegram')
+        .is('obra_codigo', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      const { data: obras } = await supabase.from('obras').select('codigo, nome')
+      const obrasParsed = parseObrasTexto(message.text, obras || [])
+
+      if (!pendentes?.length) {
+        await telegramApi('sendMessage', { chat_id: chatId, text: 'Não encontrei nenhum lançamento recente sem obra pra vincular. Envie a foto do comprovante primeiro.' })
+      } else if (!obrasParsed) {
+        const lista = (obras || []).map(o => `${o.codigo} (${o.nome})`).join(', ')
+        await telegramApi('sendMessage', { chat_id: chatId, text: `Não reconheci "${message.text}" como obra(s). Pra dividir entre várias, separe por vírgula (ex: "BR, Feira") ou com valores (ex: "BR: 600, Feira: 819"). Obras cadastradas: ${lista || 'nenhuma encontrada'}` })
+      } else {
+        const pendente = pendentes[0]
+        const rateio = calcularRateio(obrasParsed, pendente.valor || 0)
+        const todosCodigos = rateio.map(r => r.codigo)
+
+        // Atualiza o lançamento original com a primeira obra do rateio...
+        await supabase.from('despesas').update({
+          obra_codigo: rateio[0].codigo,
+          obras_codigos: todosCodigos,
+          valor: rateio[0].valor,
+          rateio_total: pendente.valor
+        }).eq('id', pendente.id)
+
+        // ...e cria um lançamento novo pra cada obra adicional
+        if (rateio.length > 1) {
+          const extras = rateio.slice(1).map(r => ({
+            item: pendente.item, fornecedor: pendente.fornecedor, responsavel: pendente.responsavel,
+            qualidade: null, data: pendente.data, observacao: pendente.observacao, origem: 'telegram',
+            obra_codigo: r.codigo, obras_codigos: todosCodigos, valor: r.valor, rateio_total: pendente.valor
+          }))
+          await supabase.from('despesas').insert(extras)
+        }
+
+        const resumo = rateio.map(r => `${r.nome}: ${r.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`).join(' | ')
+        await telegramApi('sendMessage', { chat_id: chatId, text: `✅ Prontinho! Dividi o lançamento (${pendente.fornecedor || '—'}) assim:\n${resumo}` })
+      }
+      return res.status(200).json({ ok: true })
     }
 
     if (!fileId) {
@@ -150,18 +248,9 @@ export default async function handler(req, res) {
     const arrayBuffer = await fileResp.arrayBuffer()
     const base64 = Buffer.from(arrayBuffer).toString('base64')
 
-    // Tenta identificar a obra pela legenda da mensagem
-    const { data: obras } = await supabase.from('obras').select('codigo, nome')
-    let obraCodigo = null, obraNome = null
-    if (caption && obras) {
-      const alvo = caption.toLowerCase()
-      const encontrada = obras.find(o =>
-        o.codigo?.toLowerCase() === alvo ||
-        o.nome?.toLowerCase() === alvo ||
-        o.nome?.toLowerCase().includes(alvo)
-      )
-      if (encontrada) { obraCodigo = encontrada.codigo; obraNome = encontrada.nome }
-    }
+    // Tenta identificar a(s) obra(s) pela legenda da mensagem
+    const { data: obras, error: erroObras } = await supabase.from('obras').select('codigo, nome')
+    const obrasParsedLegenda = caption ? parseObrasTexto(caption, obras || []) : null
 
     // Lê o comprovante com a IA
     let ext
@@ -172,7 +261,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true })
     }
 
-    const registro = {
+    const valorTotal = ext.valor || 0
+    const base = {
       item: ext.item || null,
       fornecedor: ext.fornecedor || null,
       responsavel: ext.responsavel || 'THE',
@@ -180,22 +270,36 @@ export default async function handler(req, res) {
       data: ext.data || new Date().toISOString().slice(0, 10),
       observacao: null,
       origem: 'telegram',
-      obra_codigo: obraCodigo,
-      obras_codigos: obraCodigo ? [obraCodigo] : [],
-      valor: ext.valor || 0,
     }
 
-    const { error } = await supabase.from('despesas').insert([registro])
-    if (error) {
-      await telegramApi('sendMessage', { chat_id: chatId, text: `❌ Erro ao salvar no sistema: ${error.message}` })
-      return res.status(200).json({ ok: true })
+    let linhaObra
+    if (obrasParsedLegenda && obrasParsedLegenda.length > 0) {
+      const rateio = calcularRateio(obrasParsedLegenda, valorTotal)
+      const todosCodigos = rateio.map(r => r.codigo)
+      const linhas = rateio.map(r => ({ ...base, obra_codigo: r.codigo, obras_codigos: todosCodigos, valor: r.valor, rateio_total: valorTotal }))
+      const { error } = await supabase.from('despesas').insert(linhas)
+      if (error) {
+        await telegramApi('sendMessage', { chat_id: chatId, text: `❌ Erro ao salvar no sistema: ${error.message}` })
+        return res.status(200).json({ ok: true })
+      }
+      linhaObra = rateio.length > 1
+        ? `\n🏗️ Dividido: ${rateio.map(r => `${r.nome} (${r.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`).join(' | ')}`
+        : `\n🏗️ Obra: ${rateio[0].nome}`
+    } else {
+      const { error } = await supabase.from('despesas').insert([{ ...base, obra_codigo: null, obras_codigos: [], valor: valorTotal }])
+      if (error) {
+        await telegramApi('sendMessage', { chat_id: chatId, text: `❌ Erro ao salvar no sistema: ${error.message}` })
+        return res.status(200).json({ ok: true })
+      }
+      linhaObra = caption
+        ? `\n⚠️ Não reconheci "${caption}" como obra. Responda com o nome certo, ou abra o app pra atribuir.`
+        : '\n⚠️ Obra não identificada — responda esta conversa com o código/nome da obra (ex: "BR", ou "BR, Feira" pra dividir) pra eu vincular, ou abra o app pra atribuir manualmente'
     }
 
-    const valorFmt = (registro.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    const linhaObra = obraNome ? `\n🏗️ Obra: ${obraNome}` : '\n⚠️ Obra não identificada — abra o app pra atribuir esse lançamento a uma obra'
+    const valorFmt = valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
     await telegramApi('sendMessage', {
       chat_id: chatId,
-      text: `✅ Lançamento criado!\n💰 ${valorFmt}\n🏪 ${registro.fornecedor || '—'}\n📅 ${registro.data}${linhaObra}`
+      text: `✅ Lançamento criado!\n💰 ${valorFmt}\n🏪 ${base.fornecedor || '—'}\n📅 ${base.data}${linhaObra}`
     })
 
     return res.status(200).json({ ok: true })
