@@ -55,7 +55,8 @@ Retorne SOMENTE este JSON válido, sem markdown:
   "fornecedor": string (nome do BENEFICIÁRIO que recebeu),
   "valor": number (valor em reais),
   "data": "YYYY-MM-DD",
-  "item": string ou null (texto EXATO do campo Descrição/Mensagem - é o item comprado. Se for "MO" escreva "Mão de Obra")
+  "item": string ou null (texto EXATO do campo Descrição/Mensagem - é o item comprado. Se for "MO" escreva "Mão de Obra"),
+  "qualidade": string (classifique o item em EXATAMENTE uma destas opções: "Documentos", "Materiais", "Mão de Obra", "Lote", "Miudezas". Ex: cimento/areia/tijolo/tinta = Materiais; MO/pedreiro/pintor/serviço = Mão de Obra; matrícula/escritura/cartório/certidão = Documentos; compra de terreno = Lote; pequenas despesas diversas = Miudezas. Se não der pra classificar, use "Materiais")
 }
 Campos não encontrados use null. Retorne APENAS o JSON.` }
     ]}],
@@ -184,7 +185,7 @@ export default async function handler(req, res) {
     if (!fileId && message.text) {
       const { data: pendentes } = await supabase
         .from('despesas')
-        .select('id, valor, fornecedor, item, data, observacao, responsavel')
+        .select('id, valor, fornecedor, item, data, observacao, responsavel, qualidade')
         .eq('origem', 'telegram')
         .is('obra_codigo', null)
         .order('created_at', { ascending: false })
@@ -215,7 +216,7 @@ export default async function handler(req, res) {
         if (rateio.length > 1) {
           const extras = rateio.slice(1).map(r => ({
             item: pendente.item, fornecedor: pendente.fornecedor, responsavel: pendente.responsavel,
-            qualidade: null, data: pendente.data, observacao: pendente.observacao, origem: 'telegram',
+            qualidade: pendente.qualidade, data: pendente.data, observacao: pendente.observacao, origem: 'telegram',
             obra_codigo: r.codigo, obras_codigos: todosCodigos, valor: r.valor, rateio_total: pendente.valor
           }))
           await supabase.from('despesas').insert(extras)
@@ -266,7 +267,7 @@ export default async function handler(req, res) {
       item: ext.item || null,
       fornecedor: ext.fornecedor || null,
       responsavel: ext.responsavel || 'THE',
-      qualidade: null,
+      qualidade: ext.qualidade || null,
       data: ext.data || new Date().toISOString().slice(0, 10),
       observacao: null,
       origem: 'telegram',
@@ -292,14 +293,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true })
       }
       linhaObra = caption
-        ? `\n⚠️ Não reconheci "${caption}" como obra. Responda com o nome certo, ou abra o app pra atribuir.`
+        ? `\n⚠️ Não reconheci "${caption}" como obra. Obras cadastradas: ${(obras || []).map(o => `${o.codigo} (${o.nome})`).join(', ') || `nenhuma encontrada${erroObras ? ' (erro: ' + erroObras.message + ')' : ''}`}. Responda esta conversa com o nome certo.`
         : '\n⚠️ Obra não identificada — responda esta conversa com o código/nome da obra (ex: "BR", ou "BR, Feira" pra dividir) pra eu vincular, ou abra o app pra atribuir manualmente'
     }
 
     const valorFmt = valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
     await telegramApi('sendMessage', {
       chat_id: chatId,
-      text: `✅ Lançamento criado!\n💰 ${valorFmt}\n🏪 ${base.fornecedor || '—'}\n📅 ${base.data}${linhaObra}`
+      text: `✅ Lançamento criado!\n💰 ${valorFmt}\n🏪 ${base.fornecedor || '—'}\n📅 ${base.data}\n🏷️ ${base.qualidade || '—'}${linhaObra}`
     })
 
     return res.status(200).json({ ok: true })
