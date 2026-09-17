@@ -4,6 +4,17 @@ const SUPABASE_URL = 'https://iugricxbqlixlfcwsoim.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3JpY3hicWxpeGxmY3dzb2ltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NDA1MzQsImV4cCI6MjA5NDAxNjUzNH0.Ng80yig__ikGknVKjdZDwJPIBwJd6buiRMA0scjJ3fU'
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+// Mesma lista de obras usada no site (é fixa no código, não vem de uma tabela do banco)
+const OBRAS = [
+  { codigo: 'F', nome: 'Feira' },
+  { codigo: 'E', nome: 'Esquina' },
+  { codigo: 'B', nome: 'BR' },
+  { codigo: 'FA', nome: 'Estranho (Faro)' },
+  { codigo: 'P', nome: 'Passarela' },
+  { codigo: '3', nome: '3 Lotes' },
+  { codigo: 'T', nome: 'THE' },
+]
+
 // ── Mesma lógica de extração com IA usada em api/gemini.js ─────────────────
 const MODELOS_RESERVA = ['gemini-flash-latest', 'gemini-3.5-flash-lite']
 
@@ -191,7 +202,7 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: false })
         .limit(1)
 
-      const { data: obras } = await supabase.from('obras').select('codigo, nome')
+      const obras = OBRAS
       const obrasParsed = parseObrasTexto(message.text, obras || [])
 
       if (!pendentes?.length) {
@@ -250,7 +261,7 @@ export default async function handler(req, res) {
     const base64 = Buffer.from(arrayBuffer).toString('base64')
 
     // Tenta identificar a(s) obra(s) pela legenda da mensagem
-    const { data: obras, error: erroObras } = await supabase.from('obras').select('codigo, nome')
+    const obras = OBRAS
     const obrasParsedLegenda = caption ? parseObrasTexto(caption, obras || []) : null
 
     // Lê o comprovante com a IA
@@ -293,7 +304,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true })
       }
       linhaObra = caption
-        ? `\n⚠️ Não reconheci "${caption}" como obra. Obras cadastradas: ${(obras || []).map(o => `${o.codigo} (${o.nome})`).join(', ') || `nenhuma encontrada${erroObras ? ' (erro: ' + erroObras.message + ')' : ''}`}. Responda esta conversa com o nome certo.`
+        ? `\n⚠️ Não reconheci "${caption}" como obra. Obras cadastradas: ${obras.map(o => `${o.codigo} (${o.nome})`).join(', ')}. Responda esta conversa com o nome certo.`
         : '\n⚠️ Obra não identificada — responda esta conversa com o código/nome da obra (ex: "BR", ou "BR, Feira" pra dividir) pra eu vincular, ou abra o app pra atribuir manualmente'
     }
 
