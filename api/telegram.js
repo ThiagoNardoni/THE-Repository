@@ -43,7 +43,7 @@ async function getModelosDisponiveis() {
     const leves = ids.filter(id => id.includes('lite') && estavel(id)).sort((a, b) => versao(b) - versao(a))
     const previews = ids.filter(id => !estavel(id)).sort((a, b) => versao(b) - versao(a))
     const ordenados = [...principais, ...leves, ...previews]
-    return ordenados.length > 0 ? ordenados.slice(0, 3) : MODELOS_RESERVA
+    return ordenados.length > 0 ? ordenados.slice(0, 2) : MODELOS_RESERVA
   } catch {
     return MODELOS_RESERVA
   }
@@ -83,14 +83,19 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body
-      }, 15000)
+      }, 25000)
       data = await response.json()
       if (!data.error) break
     } catch (e) {
       data = { error: { message: e.message } }
     }
   }
-  if (data?.error) throw new Error(data.error.message)
+  if (data?.error) {
+    const msg = /abort/i.test(data.error.message)
+      ? 'A IA demorou demais pra responder (instabilidade momentânea do Google). Tente enviar o comprovante de novo em alguns minutos.'
+      : data.error.message
+    throw new Error(msg)
+  }
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
   const clean = text.replace(/```json|```/g, '').trim()
   return JSON.parse(clean)
@@ -113,12 +118,20 @@ const normalizar = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,
 function acharObra(nomeOuCodigo, obrasDisponiveis) {
   const alvo = normalizar(nomeOuCodigo)
   if (!alvo) return null
-  return obrasDisponiveis.find(o =>
-    normalizar(o.codigo) === alvo ||
-    normalizar(o.nome) === alvo ||
-    normalizar(o.nome).includes(alvo) ||
-    alvo.includes(normalizar(o.codigo))
-  ) || null
+
+  // Correspondência exata primeiro (código ou nome) — sempre prioridade,
+  // pra "E" bater com o código "E" (Esquina) antes de qualquer outra coisa.
+  const exata = obrasDisponiveis.find(o => normalizar(o.codigo) === alvo || normalizar(o.nome) === alvo)
+  if (exata) return exata
+
+  // Correspondência "contém" só faz sentido pra textos com 3+ letras — com 1 ou 2
+  // letras, quase qualquer nome "contém" aquilo por coincidência (ex: "Feira" contém "e").
+  if (alvo.length >= 3) {
+    return obrasDisponiveis.find(o =>
+      normalizar(o.nome).includes(alvo) || alvo.includes(normalizar(o.codigo))
+    ) || null
+  }
+  return null
 }
 
 // Aceita: "BR" | "BR, Feira" | "BR: 600, Feira: 819,00" — separadores por vírgula, ";", quebra de linha ou " e "
