@@ -204,35 +204,6 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   const [importErr, setImportErr] = useState(null)
   const [importing, setImporting] = useState(false)
   const importFileRef = useRef()
-  const [debugInfo, setDebugInfo] = useState(null)
-  const [debugLog, setDebugLog] = useState([])
-  const [testandoIA, setTestandoIA] = useState(false)
-  const [testeIAResultado, setTesteIAResultado] = useState(null)
-
-  const logDebug = (msg) => setDebugLog(p => [...p, `${new Date().toLocaleTimeString('pt-BR')} — ${msg}`])
-
-  // 🔧 Diagnóstico temporário: registra, toda vez que o app abre, a URL exata
-  // que foi usada — assim conseguimos ver se um compartilhamento chegou até aqui.
-  useEffect(() => {
-    setDebugInfo({ url: window.location.href, hora: new Date().toLocaleTimeString('pt-BR') })
-    logDebug(`App/Despesas montado. URL: ${window.location.href}`)
-  }, [])
-
-  // 🔧 Teste manual: verifica se o site consegue se comunicar com a IA do Google,
-  // sem depender de nenhum comprovante real — usa uma imagem mínima de teste.
-  const testarConexaoIA = async () => {
-    setTestandoIA(true); setTesteIAResultado(null)
-    const IMAGEM_TESTE_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
-    try {
-      const inicio = Date.now()
-      await extractPix(IMAGEM_TESTE_1PX, 'image/png')
-      const segundos = ((Date.now() - inicio) / 1000).toFixed(1)
-      setTesteIAResultado({ ok: true, msg: `✅ Comunicação com a IA funcionando! (respondeu em ${segundos}s)` })
-    } catch (e) {
-      setTesteIAResultado({ ok: false, msg: `❌ Falha na comunicação com a IA: ${e.message}` })
-    }
-    setTestandoIA(false)
-  }
 
   const obraMap = Object.fromEntries(obras.map(o => [o.codigo, o]))
   const getQualFinal = (form) => form.qualidade === 'Outro' ? (form.qualidade_outro || '') : form.qualidade
@@ -260,30 +231,23 @@ export default function Despesas({ despesas, setDespesas, obras }) {
   // Check for file shared via WhatsApp / Web Share Target
   useEffect(() => {
     const checkShared = async () => {
-      logDebug(`checkShared iniciado. location.search = "${location.search}"`)
       if (!(location.search.includes('opened=share') || location.search.includes('share=true'))) {
-        logDebug('Não é uma abertura por compartilhamento. Encerrando.')
         return
       }
-      logDebug('Detectado abertura por compartilhamento (opened=share).')
       history.replaceState({}, '', '/')
       try {
         if (!window.getSharedFile) {
-          logDebug('ERRO: window.getSharedFile não existe.')
           setUploadErr('Não consegui abrir o arquivo compartilhado (recurso indisponível neste navegador). Tente selecionar o arquivo manualmente pelo botão de enviar comprovante.')
           return
         }
-        logDebug('window.getSharedFile existe. Buscando arquivo no IndexedDB...')
         // Tenta algumas vezes: pode haver uma pequena demora até o arquivo
         // ficar disponível no IndexedDB logo após o compartilhamento.
         let resultado = null
         for (let tentativa = 0; tentativa < 4 && !resultado; tentativa++) {
           if (tentativa > 0) await new Promise(r => setTimeout(r, 400))
           resultado = await window.getSharedFile()
-          logDebug(`Tentativa ${tentativa + 1}: resultado = ${resultado ? JSON.stringify({ status: resultado.status, temArquivo: !!resultado.file, tamanho: resultado.file?.size, tipo: resultado.file?.type }) : 'null'}`)
         }
         if (resultado?.file) {
-          logDebug('Arquivo encontrado! Chamando handleFile...')
           handleFile(resultado.file)
         } else if (resultado?.status && resultado.status !== 'ok') {
           if (resultado.status.startsWith('sem_arquivo')) {
@@ -292,11 +256,9 @@ export default function Despesas({ despesas, setDespesas, obras }) {
             setUploadErr(`Erro ao receber o comprovante compartilhado (${resultado.status}). Tente enviar manualmente pelo botão de enviar comprovante.`)
           }
         } else {
-          logDebug('Nenhum resultado encontrado após 4 tentativas.')
           setUploadErr('O comprovante compartilhado não chegou até o app. Tente novamente ou selecione o arquivo manualmente pelo botão de enviar comprovante.')
         }
       } catch (e) {
-        logDebug(`EXCEÇÃO capturada: ${e.message}`)
         setUploadErr(`Erro ao processar o arquivo compartilhado: ${e.message}`)
       }
     }
@@ -621,20 +583,6 @@ export default function Despesas({ despesas, setDespesas, obras }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* 🔧 Painel de diagnóstico temporário */}
-      <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 12, padding: '10px 14px', fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div>🔧 <b>Diagnóstico</b> — App aberto às {debugInfo?.hora} com a URL: <code style={{ wordBreak: 'break-all' }}>{debugInfo?.url}</code></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <Btn onClick={testarConexaoIA} outline small disabled={testandoIA}>{testandoIA ? 'Testando...' : '🔧 Testar conexão com a IA'}</Btn>
-          {testeIAResultado && <span style={{ color: testeIAResultado.ok ? '#16a34a' : '#e11d48', fontWeight: 600 }}>{testeIAResultado.msg}</span>}
-        </div>
-        {debugLog.length > 0 && (
-          <div style={{ background: '#0f172a', color: '#86efac', fontFamily: 'monospace', fontSize: 11, padding: 10, borderRadius: 8, maxHeight: 220, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {debugLog.map((linha, i) => <div key={i}>{linha}</div>)}
-          </div>
-        )}
-      </div>
-
       <div onClick={() => fileRef.current?.click()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }} onDragOver={e => e.preventDefault()}
         style={{ border: '2.5px dashed #86efac', borderRadius: 18, background: '#f0fdf4', padding: '24px 20px', textAlign: 'center', cursor: 'pointer' }}>
         <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; e.target.value = ''; handleFile(f) }} />
