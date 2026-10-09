@@ -61,16 +61,24 @@ export default async function handler(req, res) {
 
 Num comprovante de PIX:
 - O BENEFICIÁRIO (quem RECEBEU) aparece no TOPO com nome, banco, agência, conta
-- A CONTA DE ORIGEM (quem FEZ o PIX) aparece após "Conta de origem"  
+- A CONTA DE ORIGEM (quem FEZ o PIX) aparece após "Conta de origem"
 - O campo DESCRIÇÃO ou MENSAGEM contém o item comprado (ex: "Cimento", "MO", "Mão de Obra")
+
+ATENÇÃO - rótulos genéricos NÃO são dados reais: alguns apps de banco mostram um campo
+"Categoria" com um valor automático e genérico tipo "Gerais", "Geral", "Outros", "Outras",
+"Não categorizado" quando o usuário não classificou a transação. Isso NÃO é o nome do
+beneficiário nem a descrição do item - é só um rótulo padrão do banco. NUNCA copie esse
+rótulo genérico para "fornecedor" (use o nome de pessoa/empresa do beneficiário que
+aparece no topo do comprovante) nem para "item" (se não houver uma descrição/mensagem
+real e específica, retorne null para "item", não o nome da categoria genérica).
 
 Retorne SOMENTE este JSON válido, sem markdown:
 {
   "responsavel": string (nome da CONTA DE ORIGEM que fez o PIX),
-  "fornecedor": string (nome do BENEFICIÁRIO que recebeu),
+  "fornecedor": string (nome do BENEFICIÁRIO que recebeu - nome de pessoa ou empresa, nunca um rótulo de categoria genérico),
   "valor": number (valor em reais),
   "data": "YYYY-MM-DD",
-  "item": string ou null (texto EXATO do campo Descrição/Mensagem - é o item comprado. Se for "MO" escreva "Mão de Obra")
+  "item": string ou null (texto EXATO do campo Descrição/Mensagem - é o item comprado. Se for "MO" escreva "Mão de Obra". Se só existir uma categoria genérica como "Gerais"/"Outros", use null)
 }
 Campos não encontrados use null. Retorne APENAS o JSON.` }
       ]}],
