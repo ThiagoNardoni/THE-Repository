@@ -1,6 +1,6 @@
-export async function extractPix(base64, mediaType) {
+async function chamarGemini(base64, mediaType, timeoutMs) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 58000) // 58s (o servidor tem até 60s pra tentar os modelos)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch('/api/gemini', {
       method: 'POST',
@@ -15,9 +15,21 @@ export async function extractPix(base64, mediaType) {
     const { result } = await res.json()
     return JSON.parse(result)
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('A leitura demorou demais e foi cancelada. Tente novamente com uma conexão melhor.')
+    if (e.name === 'AbortError') throw new Error('A leitura demorou demais e foi cancelada.')
     throw e
   } finally {
     clearTimeout(timeoutId)
+  }
+}
+
+// Lê o comprovante com a IA. Se a primeira tentativa falhar (ex: a função do
+// servidor "dormindo" - cold start - demorando demais pra acordar), tenta
+// uma segunda vez sozinho antes de mostrar erro pra pessoa, já que nesses
+// casos a segunda tentativa quase sempre funciona rápido.
+export async function extractPix(base64, mediaType) {
+  try {
+    return await chamarGemini(base64, mediaType, 25000) // 1ª tentativa: 25s
+  } catch (e1) {
+    return await chamarGemini(base64, mediaType, 55000) // 2ª tentativa: 55s (deixa o erro subir se falhar de novo)
   }
 }
