@@ -102,7 +102,9 @@ async function getModelosDisponiveis() {
     const leves = ids.filter(id => id.includes('lite') && estavel(id)).sort((a, b) => versao(b) - versao(a))
     const previews = ids.filter(id => !estavel(id)).sort((a, b) => versao(b) - versao(a))
     const ordenados = [...principais, ...leves, ...previews]
-    return ordenados.length > 0 ? ordenados.slice(0, 2) : MODELOS_RESERVA
+    // Vários modelos: no plano gratuito cada modelo tem sua PRÓPRIA cota diária,
+    // então ter mais alternativas multiplica a capacidade disponível.
+    return ordenados.length > 0 ? ordenados.slice(0, 6) : MODELOS_RESERVA
   } catch {
     return MODELOS_RESERVA
   }
@@ -135,25 +137,30 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
 
   const MODELOS = await getModelosDisponiveis()
   let data
+  const inicio = Date.now()
   for (const modelo of MODELOS) {
+    if (Date.now() - inicio > 45000) break // respeita o limite de 60s da função
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`
     try {
       const response = await fetchComTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body
-      }, 25000)
+      }, 20000)
       data = await response.json()
       if (!data.error) break
+      // cota estourada / sobrecarga neste modelo → segue pro próximo na hora
     } catch (e) {
       data = { error: { message: e.message } }
     }
   }
   if (data?.error) {
-    const msg = /abort/i.test(data.error.message)
+    const ehCota = /quota|exceeded|rate.?limit|RESOURCE_EXHAUSTED/i.test(data.error.message || '')
+    const err = new Error(/abort/i.test(data.error.message)
       ? 'A IA demorou demais pra responder (instabilidade momentânea do Google).'
-      : data.error.message
-    throw new Error(msg)
+      : data.error.message)
+    err.ehCota = ehCota
+    throw err
   }
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
   const clean = text.replace(/```json|```/g, '').trim()
@@ -221,6 +228,16 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true, processado: true, resultado: 'sucesso' })
   } catch (e) {
+    // Cota diária do Google esgotada em todos os modelos: não adianta gastar
+    // tentativas. Deixa o item na fila (volta a tentar sozinho quando a cota
+    // renovar) e só desiste se ele estiver esperando há mais de 24h.
+    const idadeH = (Date.now() - new Date(item.created_at).getTime()) / 36e5
+    if (e.ehCota && idadeH < 24) {
+      await supabase.from('fila_comprovantes').update({
+        erro_ultimo: 'Cota diária da IA esgotada - aguardando renovar', updated_at: new Date().toISOString()
+      }).eq('id', item.id)
+      return res.status(200).json({ ok: true, processado: true, resultado: 'aguardando_cota' })
+    }
     const novasTentativas = (item.tentativas || 0) + 1
     if (novasTentativas >= MAX_TENTATIVAS) {
       await supabase.from('fila_comprovantes').update({
