@@ -39,7 +39,7 @@ async function getModelosDisponiveis() {
 
     const ordenados = [...principais, ...leves, ...previews]
     // Só os 3 primeiros: o suficiente pra ter alternativas, sem deixar o tempo total estourar
-    return ordenados.length > 0 ? ordenados.slice(0, 3) : MODELOS_RESERVA
+    return ordenados.length > 0 ? ordenados.slice(0, 6) : MODELOS_RESERVA
   } catch {
     return MODELOS_RESERVA
   }
@@ -90,7 +90,9 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
     const MODELOS = await getModelosDisponiveis()
 
     let data, ultimoErro = null, ultimoErroSobrecarga = false
+    const inicio = Date.now()
     for (const modelo of MODELOS) {
+      if (Date.now() - inicio > 45000) break // respeita o limite de 60s da função
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`
       try {
         const response = await fetchComTimeout(url, {
@@ -105,7 +107,8 @@ Campos não encontrados use null. Retorne APENAS o JSON.` }
         ultimoErro = data.error
         ultimoErroSobrecarga = response.status === 503 ||
           (data.error.message || '').toLowerCase().includes('high demand') ||
-          (data.error.message || '').toLowerCase().includes('overloaded')
+          (data.error.message || '').toLowerCase().includes('overloaded') ||
+          /quota|exceeded|resource_exhausted/i.test(data.error.message || '')
         // não deu certo (modelo sobrecarregado, não encontrado, etc.) → tenta o próximo modelo da lista
       } catch (e) {
         ultimoErro = { message: e.name === 'AbortError' ? 'Tempo esgotado' : e.message }
